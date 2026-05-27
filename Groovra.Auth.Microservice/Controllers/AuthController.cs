@@ -3,7 +3,7 @@
 namespace Groovra.Auth.Microservice.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("[controller]")]
 public class AuthController : ControllerBase
 {
     [HttpGet("test")]
