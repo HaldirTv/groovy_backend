@@ -15,4 +15,9 @@
     </PackageReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="DTOS\" />
+    <Folder Include="Protos\" />
+  </ItemGroup>
+
 </Project>
