@@ -22,24 +22,47 @@ public class TracksController : ControllerBase
         _musicService = musicService;
         _logger = logger;
     }
+    
 
     // ─── GET /music/tracks ────────────────────────────────────────────────────
 
     /// <summary>
-    /// GET /music/tracks
-    /// Возвращает список всех загруженных треков (новые — первыми).
+    /// GET /music/tracks?search=fall+down
+    /// Возвращает список треков. Если указан параметр search, делает поиск по подстроке.
     /// </summary>
-    /// <response code="200">Список треков (может быть пустым).</response>
     [HttpGet]
     [ProducesResponseType(typeof(IReadOnlyList<TrackDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAllTracks(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetAllTracks([FromQuery] string? search, CancellationToken cancellationToken)
     {
-        var tracks = await _musicService.GetAllTracksAsync(cancellationToken);
+        // Передаем строку поиска в сервис
+        var tracks = await _musicService.GetAllTracksAsync(search, cancellationToken);
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
         var result = tracks.Select(t => MapToDto(t, baseUrl)).ToList();
 
         return Ok(result);
+    }
+
+    // ─── GET /music/tracks/{id} ───────────────────────────────────────────────
+
+    /// <summary>
+    /// GET /music/tracks/{id}
+    /// Получает полную информацию о треке по его ID (включая готовые ссылки на прослушивание).
+    /// </summary>
+    [HttpGet("{id:guid}")]
+    [ProducesResponseType(typeof(TrackDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetTrackById(Guid id, CancellationToken cancellationToken)
+    {
+        var track = await _musicService.GetTrackByIdAsync(id, cancellationToken);
+
+        if (track is null)
+            return NotFound(new { Error = $"Трек с id '{id}' не найден." });
+
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        
+        // Отдаем красивый DTO, где уже лежат готовые URL для плеера
+        return Ok(MapToDto(track, baseUrl));
     }
 
     // ─── DELETE /music/tracks/{id} ────────────────────────────────────────────

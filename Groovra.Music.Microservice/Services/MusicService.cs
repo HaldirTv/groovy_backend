@@ -30,15 +30,37 @@ public class MusicService
 
     // ─── GetAll ──────────────────────────────────────────────────────────────
 
+    // ─── GetAll (теперь с умным поиском) ─────────────────────────────────────
+
     /// <summary>
-    /// Возвращает все треки из базы данных, отсортированные по дате загрузки (новые — первыми).
+    /// Возвращает треки. Если передан searchTerm, ищет частичное совпадение 
+    /// по названию трека или имени артиста (как в YouTube).
     /// </summary>
-    public async Task<IReadOnlyList<Track>> GetAllTracksAsync(CancellationToken cancellationToken = default)
-    {
-        return await _db.Tracks
+    public async Task<IReadOnlyList<Track>> GetAllTracksAsync(string? searchTerm = null, CancellationToken cancellationToken = default)
+    {   
+        var query = _db.Tracks.AsQueryable();
+
+        // Если юзер что-то ввел в поиск — фильтруем
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            query = query.Where(t => 
+                t.Title.Contains(searchTerm) || 
+                t.ArtistName.Contains(searchTerm));
+        }
+
+        return await query
             .OrderByDescending(t => t.UploadedAt)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+    }
+
+    // ─── GetById (получение конкретного трека) ───────────────────────────────
+
+    public async Task<Track?> GetTrackByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _db.Tracks
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
     }
 
     // ─── Delete ──────────────────────────────────────────────────────────────

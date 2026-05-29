@@ -1,5 +1,12 @@
 <Project>
-  <PropertyGroup>
-    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
-  </PropertyGroup>
+  <!--
+    IMPORTANT:
+    Do not set RuntimeIdentifier/RuntimeIdentifiers globally.
+
+    On Windows, a forced Linux RID often leads the IDE to attempt to launch a non‑Win32 binary and fail with:
+    CreateProcessW ... GetLastError() = 193 (%1 is not a valid Win32 application).
+
+    Choose a concrete RID only during publish, e.g.:
+      dotnet publish -r linux-x64
+  -->
 </Project>
