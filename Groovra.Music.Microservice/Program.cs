@@ -1,34 +1,44 @@
+using Groovra.Music.Microservice.Model;
+using Groovra.Music.Microservice.Services;
+using Microsoft.EntityFrameworkCore;
+using Scalar.AspNetCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// ── Services ──────────────────────────────────────────────────────────────────
+builder.Services.AddControllers();
+builder.Services.AddOpenApi();
 
+// Подключение к общей БД GroovraDB, таблицы в схеме [music]
+builder.Services.AddDbContext<MusicDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// Register services (scoped per-request)
+builder.Services.AddScoped<UploadService>();
+builder.Services.AddScoped<MusicService>();
+
+// ── App ───────────────────────────────────────────────────────────────────────
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+    app.MapScalarApiReference();
+}
 
 app.UseHttpsRedirection();
+app.UseAuthorization();
+app.MapControllers();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+// Serve stored media files as static content (for local dev).
+// In production, replace with a CDN or dedicated file-serving middleware.
+var mediaPath = builder.Configuration["MediaStorage:BasePath"]
+    ?? Path.Combine(Directory.GetCurrentDirectory(), "MediaStorage");
 
-app.MapGet("/weatherforecast", () =>
+app.UseStaticFiles(new StaticFileOptions
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(mediaPath),
+    RequestPath = "/music/files"
 });
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
