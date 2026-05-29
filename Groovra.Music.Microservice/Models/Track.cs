@@ -1,9 +1,11 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Groovra.Music.Microservice.Model;
+namespace Groovra.Music.Microservice.Models;
 
 /// <summary>
-/// EF Core сущность трека. Таблица живёт в схеме [music].[Tracks] базы GroovraDB.
+/// Domain model representing an uploaded audio track stored on disk.
+/// This is a lightweight "file-system-first" model; a proper DB-backed
+/// model (with EF Core) can be layered on top later.
 /// </summary>
 public class Track
 {
@@ -22,21 +24,21 @@ public class Track
     [MaxLength(128)]
     public string? Genre { get; set; }
 
-    /// <summary>Длительность в секундах (0 = не определена).</summary>
+    /// <summary>Duration extracted from the file header (seconds).</summary>
     public double DurationSeconds { get; set; }
 
-    /// <summary>Размер аудио-файла в байтах.</summary>
+    /// <summary>Size of the audio file in bytes.</summary>
     public long FileSizeBytes { get; set; }
 
-    /// <summary>MIME-тип аудио (audio/mpeg, audio/wav, …).</summary>
+    /// <summary>MIME type of the stored audio (e.g. audio/mpeg).</summary>
     [MaxLength(128)]
     public string ContentType { get; set; } = string.Empty;
 
-    /// <summary>Путь к аудио относительно MediaStorage (audio/&lt;guid&gt;.mp3).</summary>
+    /// <summary>Path on disk relative to the media root (e.g. "audio/2024/abc.mp3").</summary>
     [MaxLength(512)]
     public string AudioRelativePath { get; set; } = string.Empty;
 
-    /// <summary>Путь к обложке (null, если не загружена).</summary>
+    /// <summary>Optional cover image relative path.</summary>
     [MaxLength(512)]
     public string? CoverImageRelativePath { get; set; }
 
