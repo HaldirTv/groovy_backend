@@ -31,4 +31,13 @@ public class AuthController : ControllerBase
         }
         return Ok(new { Message = "User registered successfully!" });
     }
+
+    [HttpPost("login")]
+    public async Task<IActionResult> Login(LoginDto dto)
+    {
+       string? token = await _reglogService.LoginAsync(dto);
+       if(token == null)
+           return BadRequest(new { Message = "Login failed. Invalid email or password" });
+       return Ok(new { Message = "User logged in successfully!", Token = token });
+    }
 }
