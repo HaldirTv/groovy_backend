@@ -19,7 +19,8 @@ public class AuthDbContext : DbContext
             .IsUnique();
         
         modelBuilder.Entity<User>()
-            .HasIndex(u => u.Username);
+            .HasIndex(u => u.Username)
+            .IsUnique();
 
 
         // Один юзер — один профіль артиста
