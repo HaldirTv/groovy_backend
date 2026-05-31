@@ -36,7 +36,7 @@ public class MusicService
     /// Возвращает треки. Если передан searchTerm, ищет частичное совпадение 
     /// по названию трека или имени артиста (как в YouTube).
     /// </summary>
-    public async Task<IReadOnlyList<Track>> GetAllTracksAsync(string? searchTerm = null, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Track>> GetAllTracksAsync(string? searchTerm = null, Guid? userId = null, CancellationToken cancellationToken = default)
     {   
         var query = _db.Tracks.AsQueryable();
 
@@ -45,7 +45,11 @@ public class MusicService
         {
             query = query.Where(t => 
                 t.Title.Contains(searchTerm) || 
-                t.ArtistName.Contains(searchTerm));
+                t.ArtistName.Contains(searchTerm)); 
+        }
+        if(userId.HasValue)
+        {
+            query = query.Where(t => t.UserId == userId.Value);
         }
 
         return await query

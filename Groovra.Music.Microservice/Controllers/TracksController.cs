@@ -32,17 +32,18 @@ public class TracksController : ControllerBase
     /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(IReadOnlyList<TrackDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAllTracks([FromQuery] string? search, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetAllTracks([FromQuery] string? search,[FromQuery] Guid? userId, CancellationToken cancellationToken)
     {
         // Передаем строку поиска в сервис
-        var tracks = await _musicService.GetAllTracksAsync(search, cancellationToken);
+        var tracks = await _musicService.GetAllTracksAsync(search,userId,cancellationToken);
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
         var result = tracks.Select(t => MapToDto(t, baseUrl)).ToList();
 
         return Ok(result);
     }
-
+    
+    
     // ─── GET /music/tracks/{id} ───────────────────────────────────────────────
 
     /// <summary>
