@@ -77,14 +77,40 @@ public class TracksController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)] // Добавили документацию для 403 ошибки
     public async Task<IActionResult> DeleteTrack(Guid id, CancellationToken cancellationToken)
     {
-        var deleted = await _musicService.DeleteTrackAsync(id, cancellationToken);
 
-        if (!deleted)
-            return NotFound(new { Error = $"Трек с id '{id}' не найден." });
+        var userIdString = Request.Headers["X-User-Id"].ToString();
+        var userRole = Request.Headers["X-User-Role"].ToString();
 
-        return NoContent();
+        if (!Guid.TryParse(userIdString, out Guid currentUserId))
+            return Unauthorized(new { Error = "Invalid or missing user identity." });
+    
+        try
+        {
+
+            var result = await _musicService.DeleteTrackAsync(id, currentUserId, userRole, cancellationToken);
+
+
+            if (!result)
+            {
+                return NotFound(new { Error = $"Track with ID {id} not found." });
+            }
+
+
+            return NoContent(); 
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+
+            return StatusCode(StatusCodes.Status403Forbidden, new { Error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error while deleting track {TrackId}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { Error = "An unexpected error occurred." });
+        }
     }
 
     // ─── PATCH /music/tracks/{id}/title ──────────────────────────────────────
@@ -98,26 +124,64 @@ public class TracksController : ControllerBase
     /// <response code="200">Трек успешно переименован, возвращает обновлённый объект.</response>
     /// <response code="400">Некорректное тело запроса.</response>
     /// <response code="404">Трек с указанным id не найден.</response>
-    [HttpPatch("{id:guid}/title")]
-    [ProducesResponseType(typeof(TrackDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> RenameTrack(
-        Guid id,
-        [FromBody] RenameTrackRequestDto dto,
-        CancellationToken cancellationToken)
+    [HttpPatch("{id:guid}")] // Для переименования (частичного обновления) лучше всего подходит PATCH
+[ProducesResponseType(StatusCodes.Status200OK)]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+[ProducesResponseType(StatusCodes.Status401Unauthorized)]
+[ProducesResponseType(StatusCodes.Status403Forbidden)]
+[ProducesResponseType(StatusCodes.Status404NotFound)]
+public async Task<IActionResult> RenameTrack(
+    Guid id,
+    [FromBody] RenameTrackRequestDto dto,
+    CancellationToken cancellationToken)
+{
+    // 1. Валидация входного DTO
+    if (!ModelState.IsValid)
+        return ValidationProblem(ModelState);
+
+    if (string.IsNullOrWhiteSpace(dto.Title))
+        return BadRequest(new { Error = "New title cannot be empty." });
+
+    // 2. Достаем данные юзера, которые шлюз (Gateway) бережно вытащил из JWT
+    var userIdString = Request.Headers["X-User-Id"].ToString();
+    var userRole = Request.Headers["X-User-Role"].ToString();
+
+    if (!Guid.TryParse(userIdString, out Guid currentUserId))
     {
-        if (!ModelState.IsValid)
-            return ValidationProblem(ModelState);
+        return Unauthorized(new { Error = "User identity is missing or invalid." });
+    }
 
-        var track = await _musicService.RenameTrackAsync(id, dto.Title, cancellationToken);
+    try
+    {
+        // 3. Передаем ВСЕ параметры в сервис (исправили двойную запятую и нехватку аргументов)
+        var track = await _musicService.RenameTrackAsync(
+            id, 
+            dto.Title, 
+            currentUserId, 
+            userRole, 
+            cancellationToken);
 
+        // 4. Если сервис вернул null — значит трек не найден в БД
         if (track is null)
+        {
             return NotFound(new { Error = $"Трек с id '{id}' не найден." });
+        }
 
+        // 5. Всё ок, маппим и отдаем обновленный трек
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
         return Ok(MapToDto(track, baseUrl));
     }
+    catch (UnauthorizedAccessException ex)
+    {
+        // Если сервис понял, что трек чужой и юзер не админ — отдаем 403
+        return StatusCode(StatusCodes.Status403Forbidden, new { Error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Unexpected error while renaming track {TrackId}", id);
+        return StatusCode(StatusCodes.Status500InternalServerError, new { Error = "An unexpected error occurred." });
+    }
+}
 
     // ─── helpers ─────────────────────────────────────────────────────────────
 

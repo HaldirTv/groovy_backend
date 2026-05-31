@@ -1,13 +1,43 @@
+using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
+using Yarp.ReverseProxy.Transforms;
 
 var builder = WebApplication.CreateBuilder(args);
 
+
 // === 1. РЕГИСТРАЦИЯ YARP ===
 builder.Services.AddReverseProxy()
-    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
+    .AddTransforms(builderContext =>
+    {
+        builderContext.AddRequestTransform(async transformContext =>
+        {
+            var user = transformContext.HttpContext.User;
+
+            transformContext.ProxyRequest.Headers.Remove("X-User-Id");
+            transformContext.ProxyRequest.Headers.Remove("X-User-IsPremium");
+            transformContext.ProxyRequest.Headers.Remove("X-User-Role");
+            if (user.Identity?.IsAuthenticated == true)
+            {
+
+                var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier) ?? user.FindFirst("sub");
+                var isPremiumClaim = user.FindFirst("is_premium")?.Value ?? "false";
+                var roleClaim = user.FindFirst(ClaimTypes.Role) ?? user.FindFirst("role");
+            
+                if (userIdClaim != null && !string.IsNullOrEmpty(userIdClaim.Value))
+                {
+                    
+                    transformContext.ProxyRequest.Headers.Add("X-User-Id", userIdClaim.Value);
+                    transformContext.ProxyRequest.Headers.Add("X-User-IsPremium", isPremiumClaim);
+                    transformContext.ProxyRequest.Headers.Add("X-User-Role", roleClaim?.Value ?? "Listener");
+                }
+            }
+            await Task.CompletedTask;
+        });
+    });
 
 // === 2. РЕГИСТРАЦИЯ CORS ===
 builder.Services.AddCors(options =>
@@ -21,7 +51,19 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+
+    options.AddPolicy("AdminOnly", policy =>
+        policy.RequireAuthenticatedUser()
+            .RequireClaim(ClaimTypes.Role, "Admin"));
+
+    options.AddPolicy("ArtistOnly", policy =>
+        policy.RequireAuthenticatedUser()
+            .RequireClaim(ClaimTypes.Role, "Artist","Admin"));
+    
+
+});
 
 // === 3. РЕГИСТРАЦИЯ JWT АВТОРИЗАЦИИ ===
 var jwtKey = builder.Configuration["Jwt:Key"]!;

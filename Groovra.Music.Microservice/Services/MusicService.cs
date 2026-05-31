@@ -64,35 +64,42 @@ public class MusicService
     }
 
     // ─── Delete ──────────────────────────────────────────────────────────────
+    
 
-    /// <summary>
-    /// Удаляет трек из БД и удаляет связанные файлы с диска.
-    /// </summary>
-    /// <returns>
-    /// <see langword="true"/> — трек найден и удалён;<br/>
-    /// <see langword="false"/> — трек с указанным <paramref name="id"/> не найден.
-    /// </returns>
-    public async Task<bool> DeleteTrackAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteTrackAsync(Guid trackId, 
+        Guid currentUserId, 
+        string userRole, 
+        CancellationToken cancellationToken)
     {
-        var track = await _db.Tracks.FindAsync([id], cancellationToken);
+        // Исправлено: ищем по правильному trackId
+        var track = await _db.Tracks.FirstOrDefaultAsync(t => t.Id == trackId, cancellationToken);
 
         if (track is null)
         {
-            _logger.LogWarning("Delete: трек {TrackId} не найден.", id);
-            return false;
+            _logger.LogWarning("Delete: трек {TrackId} не найден.", trackId);
+            return false; // Вернет false, контроллер поймет это как 404
         }
 
-        // Удаляем аудио-файл
+
+        if (track.UserId != currentUserId && userRole != "Admin")
+        {
+            _logger.LogWarning("Security violation: Юзер {UserId} с ролью {Role} пытался удалить чужой трек {TrackId}", 
+                currentUserId, userRole, trackId);
+            
+            throw new UnauthorizedAccessException("You do not have permission to delete this track.");
+        }
+
+
         DeleteFileIfExists(Path.Combine(_mediaBasePath, track.AudioRelativePath));
 
-        // Удаляем обложку (если была)
         if (track.CoverImageRelativePath is not null)
             DeleteFileIfExists(Path.Combine(_mediaBasePath, track.CoverImageRelativePath));
+
 
         _db.Tracks.Remove(track);
         await _db.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Трек удалён. Id={TrackId}, Title={Title}", id, track.Title);
+        _logger.LogInformation("Трек успешно удалён. Id={TrackId}, Title={Title}", trackId, track.Title);
         return true;
     }
 
@@ -107,6 +114,8 @@ public class MusicService
     public async Task<Track?> RenameTrackAsync(
         Guid id,
         string newTitle,
+        Guid currentUserId, 
+        string userRole, 
         CancellationToken cancellationToken = default)
     {
         var track = await _db.Tracks.FindAsync([id], cancellationToken);
@@ -116,6 +125,10 @@ public class MusicService
             _logger.LogWarning("Rename: трек {TrackId} не найден.", id);
             return null;
         }
+        if (string.IsNullOrWhiteSpace(newTitle))
+            throw new ArgumentException("New title cannot be empty.", nameof(newTitle));
+        if(track.UserId != currentUserId && userRole != "Admin")
+            throw new UnauthorizedAccessException("You do not have permission to rename this track.");
 
         var oldTitle = track.Title;
         track.Title = newTitle.Trim();

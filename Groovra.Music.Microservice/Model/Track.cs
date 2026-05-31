@@ -41,4 +41,6 @@ public class Track
     public string? CoverImageRelativePath { get; set; }
 
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+    [Required]
+    public Guid UserId { get; set; }
 }
