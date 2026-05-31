@@ -1,5 +1,7 @@
 using Groovra.Music.Microservice.Model;
 using Groovra.Music.Microservice.Services;
+using Groovra.Shared.Grpc;
+using Grpc.Net.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
@@ -29,6 +31,21 @@ builder.Services.AddDbContext<MusicDbContext>(options =>
 // Register services (scoped per-request)
 builder.Services.AddScoped<UploadService>();
 builder.Services.AddScoped<MusicService>();
+
+builder.Services.AddGrpcClient<UserNameGrpcService.UserNameGrpcServiceClient>(o =>
+{
+    // Возьми этот URL из appsettings.json, либо захардкодь для локальной разработки
+    o.Address = new Uri(builder.Configuration["AuthGrpcUrl"] ?? "https://localhost:7008"); 
+    
+}).ConfigurePrimaryHttpMessageHandler(() =>
+{
+    var handler = new HttpClientHandler();
+    // Отключаем паранойю по поводу локальных сертификатов
+    handler.ServerCertificateCustomValidationCallback = 
+        HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+    return handler;
+});
+
 
 // ── App ───────────────────────────────────────────────────────────────────────
 var app = builder.Build();
@@ -62,5 +79,6 @@ app.UseStaticFiles(new StaticFileOptions
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(mediaPath),
     RequestPath = "/music/files"
 });
+
 
 app.Run();

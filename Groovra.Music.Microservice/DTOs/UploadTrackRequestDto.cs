@@ -17,7 +17,9 @@ public class UploadTrackRequestDto
 
     /// <summary>Genre tag (e.g. "Hip-Hop", "Electronic").</summary>
     public string? Genre { get; set; }
-
+    
+    public Guid? TargetUserId { get; set; }
+    
     /// <summary>
     /// Audio file sent as multipart/form-data.
     /// Accepted MIME types: audio/mpeg, audio/wav, audio/ogg, audio/flac.

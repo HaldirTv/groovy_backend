@@ -79,8 +79,21 @@ public class UploadService
     /// <param name="cancellationToken">Cancellation token from the HTTP context.</param>
     /// <returns>The newly created <see cref="Track"/> record.</returns>
     /// <exception cref="ArgumentException">Thrown for invalid file type or size.</exception>
+    /// <summary>
+    /// Uploads an audio file (and optional cover image) to the server's
+    /// file system and returns a <see cref="Track"/> domain object describing
+    /// the stored asset.
+    /// </summary>
+    /// <param name="dto">Validated request data from the controller.</param>
+    /// <param name="ownerUserId">ID пользователя, который загружает трек.</param>
+    /// <param name="artistName">Финальное имя артиста (от шлюза или админа).</param>
+    /// <param name="cancellationToken">Cancellation token from the HTTP context.</param>
+    /// <returns>The newly created <see cref="Track"/> record.</returns>
+    /// <exception cref="ArgumentException">Thrown for invalid file type or size.</exception>
     public async Task<Track> UploadTrackAsync(
         UploadTrackRequestDto dto,
+        Guid ownerUserId,   // <--- 1. ДОБАВИЛИ ID ЮЗЕРА
+        string artistName,  // <--- 2. ДОБАВИЛИ ИМЯ АРТИСТА
         CancellationToken cancellationToken = default)
     {
         // ── 1. Validate the audio file ────────────────────────────────────
@@ -126,8 +139,9 @@ public class UploadService
         var track = new Track
         {
             Id = trackId,
+            UserId = ownerUserId,             // <--- 3. ПРИВЯЗЫВАЕМ ТРЕК К ВЛАДЕЛЬЦУ (ЮЗЕРУ)!
             Title = dto.Title.Trim(),
-            ArtistName = dto.ArtistName.Trim(),
+            ArtistName = artistName.Trim(),   // <--- 4. ИСПОЛЬЗУЕМ ИМЯ ИЗ ПАРАМЕТРА (а не dto.ArtistName)
             Album = string.IsNullOrWhiteSpace(dto.Album) ? null : dto.Album.Trim(),
             Genre = string.IsNullOrWhiteSpace(dto.Genre) ? null : dto.Genre.Trim(),
             DurationSeconds = 0, // Placeholder: populate with TagLib# or similar later
@@ -143,8 +157,8 @@ public class UploadService
         await _db.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Трек сохранён в БД. Id={TrackId}, Title={Title}",
-            track.Id, track.Title);
+            "Трек сохранён в БД. Id={TrackId}, Title={Title}, OwnerId={OwnerId}",
+            track.Id, track.Title, track.UserId);
 
         return track;
     }

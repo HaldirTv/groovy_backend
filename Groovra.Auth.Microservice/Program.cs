@@ -8,6 +8,7 @@ using Scalar.AspNetCore;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+builder.Services.AddGrpc();
 builder.Services.AddOpenApi();
 
 
@@ -45,4 +46,5 @@ app.UseHttpsRedirection();
 app.UseAuthorization(); 
 
 app.MapControllers();
+app.MapGrpcService<Groovra.Auth.Microservice.GRPC.UserNameGrpcService>();
 app.Run();
