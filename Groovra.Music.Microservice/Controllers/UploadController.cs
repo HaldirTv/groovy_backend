@@ -5,10 +5,6 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Groovra.Music.Microservice.Controllers;
 
-/// <summary>
-/// Handles audio track uploads for the Groovra Music Microservice.
-/// Base route: /music/upload
-/// </summary>
 [ApiController]
 [Route("music/[controller]")]
 [Produces("application/json")]
@@ -19,7 +15,7 @@ public class UploadController : ControllerBase
     private readonly ILogger<UploadController> _logger;
 
     public UploadController(
-        UploadService uploadService, 
+        UploadService uploadService,
         UserNameGrpcService.UserNameGrpcServiceClient grpcClient,
         ILogger<UploadController> logger)
     {
@@ -69,18 +65,18 @@ public class UploadController : ControllerBase
         string finalArtistName;
 
         // ── 4. Исправленная логика gRPC и определения владельца ─────────────
-        
+
         // Сценарий А: Запрос делает Админ И он указал, для какого артиста загружает трек
         if (userRole == "Admin" && dto.TargetUserId.HasValue)
         {
             finalOwnerId = dto.TargetUserId.Value; // Трек запишется на этого артиста!
-            
+
             try
             {
                 // Идем по gRPC в Auth, чтобы проверить, существует ли такой артист и взять его имя
                 var grpcRequest = new UserNameGrpcRequest { UserId = finalOwnerId.ToString() };
                 var grpcResponse = await _grpcClient.GetUserNameGrpcAsync(grpcRequest, cancellationToken: cancellationToken);
-                
+
                 finalArtistName = grpcResponse.Username; // Взяли реальное имя из базы Auth
             }
             catch (Grpc.Core.RpcException ex) when (ex.StatusCode == Grpc.Core.StatusCode.NotFound)
@@ -97,13 +93,13 @@ public class UploadController : ControllerBase
         else
         {
             finalOwnerId = currentUserId; // Владелец — тот, кто нажал кнопку
-            
+
             try
             {
                 // Запрашиваем имя текущего пользователя
                 var grpcRequest = new UserNameGrpcRequest { UserId = userIdString };
                 var grpcResponse = await _grpcClient.GetUserNameGrpcAsync(grpcRequest, cancellationToken: cancellationToken);
-                
+
                 finalArtistName = grpcResponse.Username;
             }
             catch (Grpc.Core.RpcException ex)
@@ -113,13 +109,14 @@ public class UploadController : ControllerBase
             }
         }
 
-  
+
         try
         {
             // Передаем currentUserId и finalArtistName в сервис!
             var track = await _uploadService.UploadTrackAsync(dto, finalOwnerId, finalArtistName, cancellationToken);
             var baseUrl = $"{Request.Scheme}://{Request.Host}";
-            var audioUrl = $"{baseUrl}/music/files/audio/{track.Id}{System.IO.Path.GetExtension(track.AudioRelativePath)}";
+            // AudioUrl указывает на streaming endpoint с поддержкой HTTP Range
+            var audioUrl = $"{baseUrl}/music/tracks/{track.Id}/stream";
             var coverUrl = track.CoverImageRelativePath is not null
                 ? $"{baseUrl}/music/files/covers/{track.Id}_cover{System.IO.Path.GetExtension(track.CoverImageRelativePath)}"
                 : null;
@@ -139,7 +136,7 @@ public class UploadController : ControllerBase
                 UploadedAt = track.UploadedAt,
             };
 
-            _logger.LogInformation("Track uploaded successfully. Id={TrackId}, OwnerId={OwnerId}, UploadedBy={UploaderId}", 
+            _logger.LogInformation("Track uploaded successfully. Id={TrackId}, OwnerId={OwnerId}, UploadedBy={UploaderId}",
                 track.Id, finalOwnerId, currentUserId);
 
             return CreatedAtAction(nameof(UploadTrack), new { id = track.Id }, response);

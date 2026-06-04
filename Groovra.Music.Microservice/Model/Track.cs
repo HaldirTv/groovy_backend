@@ -2,9 +2,6 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Groovra.Music.Microservice.Model;
 
-/// <summary>
-/// EF Core сущность трека. Таблица живёт в схеме [music].[Tracks] базы GroovraDB.
-/// </summary>
 public class Track
 {
     [Key]

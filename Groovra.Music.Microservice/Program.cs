@@ -74,10 +74,17 @@ if (!Directory.Exists(mediaPath))
     Directory.CreateDirectory(mediaPath);
 }
 
+// Раздаём ТОЛЬКО обложки (covers/) как статику.
+// Аудиофайлы (audio/) намеренно НЕ включены: они отдаются через
+// streaming endpoint /music/tracks/{id}/stream с поддержкой HTTP Range.
+var coversPath = Path.Combine(mediaPath, "covers");
+if (!Directory.Exists(coversPath))
+    Directory.CreateDirectory(coversPath);
+
 app.UseStaticFiles(new StaticFileOptions
 {
-    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(mediaPath),
-    RequestPath = "/music/files"
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(coversPath),
+    RequestPath  = "/music/files/covers"
 });
 
 
