@@ -22,14 +22,7 @@ public class TracksController : ControllerBase
         _musicService = musicService;
         _logger = logger;
     }
-    
 
-    // ─── GET /music/tracks ────────────────────────────────────────────────────
-
-    /// <summary>
-    /// GET /music/tracks?search=fall+down
-    /// Возвращает список треков. Если указан параметр search, делает поиск по подстроке.
-    /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(IReadOnlyList<TrackDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAllTracks([FromQuery] string? search,[FromQuery] Guid? userId, CancellationToken cancellationToken)
@@ -42,8 +35,8 @@ public class TracksController : ControllerBase
 
         return Ok(result);
     }
-    
-    
+
+
     // ─── GET /music/tracks/{id} ───────────────────────────────────────────────
 
     /// <summary>
@@ -61,9 +54,42 @@ public class TracksController : ControllerBase
             return NotFound(new { Error = $"Трек с id '{id}' не найден." });
 
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
-        
+
         // Отдаем красивый DTO, где уже лежат готовые URL для плеера
         return Ok(MapToDto(track, baseUrl));
+    }
+
+    // ─── GET /music/tracks/{id}/stream ───────────────────────────────────────
+
+    /// <summary>
+    /// GET /music/tracks/{id}/stream
+    /// Потоковая отдача аудиофайла с поддержкой HTTP Range (для плееров и перемотки).
+    /// </summary>
+    /// <param name="id">GUID трека.</param>
+    /// <response code="200">Файл отдаётся целиком или частично (206 Partial Content).</response>
+    /// <response code="404">Трек или файл не найден.</response>
+    [HttpGet("{id:guid}/stream")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> StreamTrack(Guid id, CancellationToken cancellationToken)
+    {
+        var fileInfo = await _musicService.GetTrackFileInfoAsync(id, cancellationToken);
+
+        if (fileInfo is null)
+            return NotFound(new { Error = $"Трек с id '{id}' не найден." });
+
+        var (absolutePath, contentType) = fileInfo.Value;
+
+        if (!System.IO.File.Exists(absolutePath))
+        {
+            _logger.LogWarning("Stream: файл не найден на диске для трека {TrackId}: {Path}", id, absolutePath);
+            return NotFound(new { Error = $"Аудиофайл трека '{id}' отсутствует на сервере." });
+        }
+
+        // enableRangeProcessing: true включает поддержку 206 Partial Content
+        // и позволяет плеерам перематывать/прокручивать аудио без полной загрузки.
+        return PhysicalFile(absolutePath, contentType, enableRangeProcessing: true);
     }
 
     // ─── DELETE /music/tracks/{id} ────────────────────────────────────────────
@@ -87,7 +113,7 @@ public class TracksController : ControllerBase
 
         if (!Guid.TryParse(userIdString, out Guid currentUserId))
             return Unauthorized(new { Error = "Invalid or missing user identity." });
-    
+
         try
         {
 
@@ -100,7 +126,7 @@ public class TracksController : ControllerBase
             }
 
 
-            return NoContent(); 
+            return NoContent();
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -156,10 +182,10 @@ public async Task<IActionResult> RenameTrack(
     {
         // 3. Передаем ВСЕ параметры в сервис (исправили двойную запятую и нехватку аргументов)
         var track = await _musicService.RenameTrackAsync(
-            id, 
-            dto.Title, 
-            currentUserId, 
-            userRole, 
+            id,
+            dto.Title,
+            currentUserId,
+            userRole,
             cancellationToken);
 
         // 4. Если сервис вернул null — значит трек не найден в БД
@@ -184,12 +210,12 @@ public async Task<IActionResult> RenameTrack(
     }
 }
 
-    // ─── helpers ─────────────────────────────────────────────────────────────
+    // ─── helpers ────────────────────────────────────────────────────────
 
     private static TrackDto MapToDto(Track track, string baseUrl)
     {
-        var audioExt = Path.GetExtension(track.AudioRelativePath);
-        var audioUrl = $"{baseUrl}/music/files/audio/{track.Id}{audioExt}";
+        // AudioUrl теперь указывает на streaming endpoint с поддержкой HTTP Range
+        var audioUrl = $"{baseUrl}/music/tracks/{track.Id}/stream";
 
         string? coverUrl = null;
         if (track.CoverImageRelativePath is not null)

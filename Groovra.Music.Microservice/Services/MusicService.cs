@@ -67,6 +67,31 @@ public class MusicService
             .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
     }
 
+    // ─── GetTrackFileInfo (путь на диске + MIME-тип для стриминга) ────────────
+
+    /// <summary>
+    /// Возвращает абсолютный путь к аудиофайлу трека на диске и его MIME-тип.
+    /// Используется endpoint'ом стриминга для PhysicalFile с Range-поддержкой.
+    /// </summary>
+    /// <returns>
+    /// Кортеж (абсолютный путь, contentType) или <see langword="null"/>, если трек не найден.
+    /// </returns>
+    public async Task<(string AbsolutePath, string ContentType)?> GetTrackFileInfoAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var track = await _db.Tracks
+            .AsNoTracking()
+            .Select(t => new { t.Id, t.AudioRelativePath, t.ContentType })
+            .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+
+        if (track is null)
+            return null;
+
+        var absolutePath = Path.Combine(_mediaBasePath, track.AudioRelativePath);
+        return (absolutePath, track.ContentType);
+    }
+
     // ─── Delete ──────────────────────────────────────────────────────────────
     
 
