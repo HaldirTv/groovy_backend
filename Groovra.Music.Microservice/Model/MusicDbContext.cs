@@ -23,6 +23,7 @@ public class MusicDbContext : DbContext
             entity.Property(t => t.ContentType).HasMaxLength(128);
             entity.Property(t => t.AudioRelativePath).IsRequired().HasMaxLength(512);
             entity.Property(t => t.CoverImageRelativePath).HasMaxLength(512);
+            entity.Property(t => t.PlayCount).IsRequired().HasDefaultValue(0L);
         });
     }
 }

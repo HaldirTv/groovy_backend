@@ -71,9 +71,18 @@ public class TracksController : ControllerBase
     [HttpGet("{id:guid}/stream")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status206PartialContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> StreamTrack(Guid id, CancellationToken cancellationToken)
     {
+        // ─── Проверка авторизации через заголовки шлюза ─────────────────────────
+        var userIdString = Request.Headers["X-User-Id"].ToString();
+        var userRole     = Request.Headers["X-User-Role"].ToString();
+
+        if (!Guid.TryParse(userIdString, out _))
+            return Unauthorized(new { Error = "Streaming requires authentication. Missing or invalid X-User-Id header." });
+
+        // ─── Получение информации о файле ────────────────────────────────────
         var fileInfo = await _musicService.GetTrackFileInfoAsync(id, cancellationToken);
 
         if (fileInfo is null)
@@ -86,6 +95,13 @@ public class TracksController : ControllerBase
             _logger.LogWarning("Stream: файл не найден на диске для трека {TrackId}: {Path}", id, absolutePath);
             return NotFound(new { Error = $"Аудиофайл трека '{id}' отсутствует на сервере." });
         }
+
+        // ─── Инкремент PlayCount (fire-and-forget, не блокирует отдачу) ────────
+        _ = _musicService.IncrementPlayCountAsync(id, CancellationToken.None);
+
+        _logger.LogInformation(
+            "Stream: трек {TrackId} запрошен пользователем {UserId} (роль: {UserRole}).",
+            id, userIdString, userRole);
 
         // enableRangeProcessing: true включает поддержку 206 Partial Content
         // и позволяет плеерам перематывать/прокручивать аудио без полной загрузки.
@@ -226,17 +242,18 @@ public async Task<IActionResult> RenameTrack(
 
         return new TrackDto
         {
-            TrackId       = track.Id,
-            Title         = track.Title,
-            ArtistName    = track.ArtistName,
-            Album         = track.Album,
-            Genre         = track.Genre,
+            TrackId         = track.Id,
+            Title           = track.Title,
+            ArtistName      = track.ArtistName,
+            Album           = track.Album,
+            Genre           = track.Genre,
             DurationSeconds = track.DurationSeconds,
-            FileSizeBytes = track.FileSizeBytes,
-            ContentType   = track.ContentType,
-            AudioUrl      = audioUrl,
-            CoverImageUrl = coverUrl,
-            UploadedAt    = track.UploadedAt,
+            FileSizeBytes   = track.FileSizeBytes,
+            ContentType     = track.ContentType,
+            AudioUrl        = audioUrl,
+            CoverImageUrl   = coverUrl,
+            UploadedAt      = track.UploadedAt,
+            PlayCount       = track.PlayCount,
         };
     }
 }
