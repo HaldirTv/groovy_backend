@@ -38,6 +38,10 @@ public class Track
     public string? CoverImageRelativePath { get; set; }
 
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+
     [Required]
     public Guid UserId { get; set; }
+
+    /// <summary>Количество прослушиваний трека.</summary>
+    public long PlayCount { get; set; } = 0;
 }

@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Groovra.Music.Microservice.Services;
 
 /// <summary>
-/// Сервис для управления треками: получение списка, удаление, переименование.
+/// Сервис для управления треками: получение списка, удаление, переименование, учёт прослушиваний.
 /// </summary>
 public class MusicService
 {
@@ -169,6 +169,33 @@ public class MusicService
             id, oldTitle, track.Title);
 
         return track;
+    }
+
+    // ─── IncrementPlayCount ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Атомарно увеличивает счётчик прослушиваний трека на 1.
+    /// Использует ExecuteUpdateAsync — обновляет только одно поле без загрузки сущности.
+    /// </summary>
+    /// <param name="trackId">GUID трека.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>True — счётчик обновлён; false — трек не найден.</returns>
+    public async Task<bool> IncrementPlayCountAsync(Guid trackId, CancellationToken cancellationToken = default)
+    {
+        var updated = await _db.Tracks
+            .Where(t => t.Id == trackId)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(t => t.PlayCount, t => t.PlayCount + 1),
+                cancellationToken);
+
+        if (updated == 0)
+        {
+            _logger.LogWarning("IncrementPlayCount: трек {TrackId} не найден.", trackId);
+            return false;
+        }
+
+        _logger.LogDebug("PlayCount увеличен для трека {TrackId}.", trackId);
+        return true;
     }
 
     // ─── helpers ─────────────────────────────────────────────────────────────

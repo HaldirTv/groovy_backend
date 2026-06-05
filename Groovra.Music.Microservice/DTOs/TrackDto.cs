@@ -37,4 +37,7 @@ public class TrackDto
 
     /// <summary>Дата и время загрузки (UTC).</summary>
     public DateTime UploadedAt { get; set; }
+
+    /// <summary>Количество прослушиваний.</summary>
+    public long PlayCount { get; set; }
 }
