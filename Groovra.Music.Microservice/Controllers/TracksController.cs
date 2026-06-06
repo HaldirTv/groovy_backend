@@ -62,17 +62,38 @@ public class TracksController : ControllerBase
     // ─── GET /music/tracks/{id}/stream ───────────────────────────────────────
 
     /// <summary>
-    /// GET /music/tracks/{id}/stream
-    /// Потоковая отдача аудиофайла с поддержкой HTTP Range (для плееров и перемотки).
+    /// Потоковая отдача аудиофайла с поддержкой HTTP Range Requests (RFC 7233).
     /// </summary>
+    /// <remarks>
+    /// Поддерживает частичный контент (HTTP 206) для перемотки и посекундной загрузки
+    /// аудио в браузерных плеерах без полной загрузки файла.
+    ///
+    /// **Заголовок Range:**
+    /// Клиент может передать заголовок `Range: bytes=0-99`, чтобы получить
+    /// первые 100 байт файла. Сервер ответит `206 Partial Content` с заголовками
+    /// `Content-Range` и `Accept-Ranges: bytes`.
+    ///
+    /// **Кэширование:**
+    /// Ответ содержит `Cache-Control: public, max-age=31536000, immutable`,
+    /// что позволяет браузеру и CDN кэшировать аудиофайл на 1 год.
+    /// Аудиофайлы идентифицируются по неизменяемому GUID трека, поэтому
+    /// долгосрочное кэширование безопасно.
+    ///
+    /// **Авторизация:**
+    /// Требует заголовок `X-User-Id` (проставляется API Gateway после проверки JWT).
+    /// </remarks>
     /// <param name="id">GUID трека.</param>
-    /// <response code="200">Файл отдаётся целиком или частично (206 Partial Content).</response>
-    /// <response code="404">Трек или файл не найден.</response>
+    /// <response code="200">Аудиофайл отдаётся целиком (без заголовка Range).</response>
+    /// <response code="206">Частичный контент — ответ на запрос с заголовком <c>Range</c>.</response>
+    /// <response code="401">Заголовок <c>X-User-Id</c> отсутствует или недействителен.</response>
+    /// <response code="404">Трек или аудиофайл не найдены.</response>
+    /// <response code="416">Запрошенный диапазон байт выходит за пределы файла.</response>
     [HttpGet("{id:guid}/stream")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status206PartialContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status416RangeNotSatisfiable)]
     public async Task<IActionResult> StreamTrack(Guid id, CancellationToken cancellationToken)
     {
         // ─── Проверка авторизации через заголовки шлюза ─────────────────────────
@@ -102,6 +123,11 @@ public class TracksController : ControllerBase
         _logger.LogInformation(
             "Stream: трек {TrackId} запрошен пользователем {UserId} (роль: {UserRole}).",
             id, userIdString, userRole);
+
+        // ─── Заголовки кэширования ───────────────────────────────────────────
+        // Аудиофайлы идентифицируются неизменяемым GUID → можно кэшировать на год.
+        // «immutable» сообщает браузеру не отправлять If-Modified-Since при перезагрузке.
+        Response.Headers.CacheControl = "public, max-age=31536000, immutable";
 
         // enableRangeProcessing: true включает поддержку 206 Partial Content
         // и позволяет плеерам перематывать/прокручивать аудио без полной загрузки.
