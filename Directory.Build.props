@@ -9,4 +9,14 @@
     Choose a concrete RID only during publish, e.g.:
       dotnet publish -r linux-x64
   -->
+
+  <!--
+    Arch Linux reports RID as 'arch-x64', which NuGet does not recognise as a
+    valid app-host RID.  Unconditionally override on Linux so that restore can
+    resolve Microsoft.NETCore.App.Host.linux-x64 from nuget.org.
+  -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <NuGetRuntimeIdentifier>linux-x64</NuGetRuntimeIdentifier>
+    <AppHostRuntimeIdentifier>linux-x64</AppHostRuntimeIdentifier>
+  </PropertyGroup>
 </Project>

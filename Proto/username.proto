@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+option csharp_namespace = "Groovra.Shared.Grpc";
+
+package username;
+
+// gRPC service stub — matches the real contract expected by UploadController.
+service UserNameGrpcService {
+  rpc GetUserNameGrpc (UserNameGrpcRequest) returns (GetUserNameGrpcResponse);
+}
+
+message UserNameGrpcRequest {
+  string user_id = 1;
+}
+
+message GetUserNameGrpcResponse {
+  string username = 1;
+}
