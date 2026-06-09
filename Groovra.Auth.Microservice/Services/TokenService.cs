@@ -22,7 +22,6 @@ public class TokenService
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Email, user.Email)
         };
-
         // Добавляем только роли из таблицы Roles
         foreach (var role in user.Roles)
         {
@@ -38,7 +37,7 @@ public class TokenService
             issuer: _configuration["Jwt:Issuer"],
             audience: _configuration["Jwt:Audience"],
             claims: claims,
-            expires: DateTime.UtcNow.AddDays(1),
+            expires: DateTime.UtcNow.AddMinutes(5),
             signingCredentials: creds
         );
 

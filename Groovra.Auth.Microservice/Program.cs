@@ -19,6 +19,8 @@ builder.Services.AddDbContext<AuthDbContext>(options =>
 
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<ReglogService>();
+builder.Services.AddTransient<EmailService>();
+
 builder.Services.AddOpenApi(options =>
 {
     options.AddDocumentTransformer((document, context, cancellationToken) =>
@@ -31,6 +33,15 @@ builder.Services.AddOpenApi(options =>
         };
         return Task.CompletedTask;
     });
+});
+
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+
+    options.Configuration = builder.Configuration["Redis:ConnectionString"];
+    
+    // Префікс GroovraAuth_ автоматично дописуєтся до ключів цього сервісу, щоб не було конфліктів імен бо redis збереження для всіх сервісів 
+    options.InstanceName = "GroovraAuth_"; 
 });
 var app = builder.Build();
 
