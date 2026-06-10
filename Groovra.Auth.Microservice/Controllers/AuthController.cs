@@ -1,7 +1,7 @@
-﻿using Groovra.Auth.Microservice.DTOs;
+﻿using System.Text.Json;
+using Groovra.Auth.Microservice.DTOs;
 using Groovra.Auth.Microservice.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Distributed;
 
 namespace Groovra.Auth.Microservice.Controllers;
 
@@ -9,93 +9,77 @@ namespace Groovra.Auth.Microservice.Controllers;
 [Route("auth")]
 public class AuthController : ControllerBase
 {
-    ReglogService _reglogService;
-    TokenService _tokenService;
-    IDistributedCache _cache;
-    public AuthController(ReglogService reglogService, IDistributedCache distributedCache,TokenService tokenService)  
+    private readonly ReglogService _reglogService;
+    private readonly TokenService _tokenService;
+
+    public AuthController(ReglogService reglogService, TokenService tokenService)  
     {
         _reglogService = reglogService;
-        _cache = distributedCache;
         _tokenService = tokenService;
     }
 
     [HttpGet("test")]
-    public IActionResult Test()
-    {
-        return Ok(new { Message = "Auth Microservice is running successfully!" });
-    }
+    public IActionResult Test() => Ok(new { Message = "Auth Microservice is running successfully!" });
 
     [HttpPost("register")]
-    public async Task<IActionResult> Register(RegisterDto dto,CancellationToken cancellationToken = default)
+    public async Task<IActionResult> Register(RegisterDto dto, CancellationToken cancellationToken = default)
     {
-        var user = await _reglogService.RegisterAsync(dto,cancellationToken);
-        if (user == null)
-        {
-            return BadRequest(new { Message = "Registration failed. Email might already be in use." });
-        }
-        return Ok(new { Message = "User registered successfully!" });
+        var result = await _reglogService.RegisterUnVerifiedAsync(dto, cancellationToken);
+        if (!result.Success) return BadRequest(new { Message = result.ErrorMessage });
+        return Ok(new { Message = "User registered successfully! You have 10 minutes to verify." });
+    }
+
+    [HttpPost("confirmregister")]
+    public async Task<IActionResult> ConfirmRegister(ConfirmRegisterDto confirmRegisterDto, CancellationToken ctoken = default)
+    {
+        var result = await _reglogService.ConfirmEmailAsync(confirmRegisterDto.Email, confirmRegisterDto.Code, ctoken);
+        if(!result.Success) return BadRequest(new { Message = result.ErrorMessage });
+        
+        return Ok(new { Message = "User verified successfully!", Token = _tokenService.GenerateToken(result.Data) });
     }
 
     [HttpPost("login")]
-    public async Task<IActionResult> Login(LoginDto dto,CancellationToken cancellationToken = default)
+    public async Task<IActionResult> Login(LoginDto dto, CancellationToken cancellationToken = default)
     {
-       var user = await _reglogService.ValidateUserForLoginAsync(dto,cancellationToken);
-       if(user ==null){
-           return Unauthorized(new { Message = "Invalid email or password." });
-       }
-       string accessToken = _tokenService.GenerateToken(user);
-       
-       string refreshToken = Guid.NewGuid().ToString("N");
-       string deviceId = dto.DeviceId ?? "default_web_client";
-       string cacheKey = $"refresh:{user.Email}:{deviceId}";
-       
-       await _cache.SetStringAsync(cacheKey, refreshToken, new DistributedCacheEntryOptions
-       {
-           AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(30)
-       }, cancellationToken);
-       
-       Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
-       {
-           HttpOnly = true,       // Защита от XSS (JS-скрипты фронта не смогут украсть токен)
-           Secure = true,
-           SameSite = SameSiteMode.None,//!!!надо будет подумать 
-           Expires = DateTimeOffset.UtcNow.AddDays(30)
-       });
-       
-       return Ok(new { Message = "User logged in successfully!", Token = accessToken });
+        var result = await _reglogService.ValidateUserForLoginAsync(dto, cancellationToken);
+        if (!result.Success) return Unauthorized(new { Message = result.ErrorMessage });
+
+        var user = result.Data;
+        string deviceId = dto.DeviceId ?? "default_web_client";
+        string refreshToken = await _reglogService.CreateSessionAsync(user.Email, deviceId, cancellationToken);
+        
+        Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions 
+        { 
+            HttpOnly = true, 
+            Secure = true, 
+            SameSite = SameSiteMode.None, 
+            Expires = DateTimeOffset.UtcNow.AddDays(30) 
+        });
+
+        return Ok(new { Message = "User logged in successfully!", Token = _tokenService.GenerateToken(user) });
     }
 
     [HttpPost("refresh")]
-    public async Task<IActionResult> Refresh([FromBody] RefreshRequestDto dto,
-        CancellationToken cancellationToken = default)
+    public async Task<IActionResult> Refresh([FromBody] RefreshRequestDto dto)
     {
-        if (!Request.Cookies.TryGetValue("refreshToken", out var clientRefreshToken))
-        {
+        if (!Request.Cookies.TryGetValue("refreshToken", out var clientToken))
             return Unauthorized(new { Message = "Refresh token cookie is missing." });
-        }
-        string deviceId = dto.DeviceId ?? "default_web_client";
-        string cacheKey = $"refresh:{dto.Email}:{deviceId}";
-        string? savedRefreshToken = await _cache.GetStringAsync(cacheKey, cancellationToken);
-        
-        if (string.IsNullOrEmpty(savedRefreshToken) || savedRefreshToken != clientRefreshToken)
-        {
-            return Unauthorized(new { Message = "Invalid or expired refresh token. Please login again." });
-        }
-        
-        var user = await _reglogService.FindUserByEmailAsync(dto.Email,true,cancellationToken);
-        if (user == null) return NotFound(new { Message = "User not found." });
-        
-        string newAccessToken = _tokenService.GenerateToken(user);
 
-        return Ok(new { Token = newAccessToken });
-        
+        var deviceId = dto.DeviceId ?? "default_web_client";
+        var valResult = await _reglogService.ValidateRefreshTokenAsync(dto.Email, deviceId, clientToken);
+        if (!valResult.Success) return Unauthorized(new { Message = valResult.ErrorMessage });
+
+        var user = await _reglogService.FindUserByEmailAsync(dto.Email);
+        if (user == null) return NotFound(new { Message = "User not found." });
+
+        return Ok(new { Token = _tokenService.GenerateToken(user) });
     }
+    
     [HttpPost("logout")]
-    public async Task<IActionResult> Logout([FromBody]LogoutDto dto)
+    public async Task<IActionResult> Logout([FromBody] LogoutDto dto, CancellationToken ctoken)
     {
         string deviceId = dto.DeviceId ?? "default_web_client";
-        string cacheKey = $"refresh:{dto.Email}:{deviceId}";
-        await _cache.RemoveAsync(cacheKey);
+        await _reglogService.RemoveSessionAsync(dto.Email, deviceId);
         Response.Cookies.Delete("refreshToken");
         return Ok(new { Message = "User logged out." });
     }
@@ -105,90 +89,80 @@ public class AuthController : ControllerBase
     {
         try
         {
-            var userIdHeader = Request.Headers["X-User-Id"].ToString();
-            if (string.IsNullOrWhiteSpace(userIdHeader))
-            {
-                return Unauthorized(new { Message = "User ID header is missing." });
-            }
-            if (!Guid.TryParse(userIdHeader, out Guid userId))
-            {
-                return BadRequest(new { message = "Невірний формат GUID в заголовке X-User-Id." });
-            }
+            if (!Guid.TryParse(Request.Headers["X-User-Id"], out Guid userId))
+                return Unauthorized(new { Message = "User ID invalid or missing." });
             
-            var user = await _reglogService.FindUserByIdAsync(userId,true,ctoken);
-            if (user == null)
-            {
-                return NotFound(new { Message = "User not found." });
-            }
-            await _reglogService.ChangePasswordAsync(user, dto.OldPassword, dto.NewPassword, ctoken);
+            var user = await _reglogService.FindUserByIdAsync(userId, true, ctoken);
+            if (user == null) return NotFound(new { Message = "User not found." });
+
+            var passwordResult = await _reglogService.ChangePasswordAsync(user, dto.OldPassword, dto.NewPassword, ctoken);
+            if (!passwordResult.Success) return BadRequest(new { Message = passwordResult.ErrorMessage });
+
+            await _reglogService.RevokeAllSessionsAsync(user.Email, ctoken);
             return Ok(new { Message = "Password changed successfully!" });
         }
         catch (Exception ex)
         {
-            return BadRequest(new { Message = $"Exception: {ex.Message}" });
+            return BadRequest(new { Message = ex.Message });
         }
     }
 
-    
-    
-    //Endpoints для збросу пароля по пошті
-    [HttpPost("requestresetpassword")]
-    public async Task<IActionResult> RequestPasswordReset([FromBody]RequestPasswordResetDto dto,CancellationToken cancellationToken = default)
+    [HttpPost("revoke-all")]
+    public async Task<IActionResult> RevokeAll(CancellationToken ctoken)
     {
-        var user = await _reglogService.FindUserByEmailAsync(dto.Email,true,cancellationToken);
-        if(user==null)return NotFound(new { Message = "No user found with the provided email." });
-        string code = await _reglogService.RequestPasswordResetAsync(user, cancellationToken);
-        
-        var cacheOptions = new DistributedCacheEntryOptions
-        {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5)
-        };
-        await _cache.SetStringAsync($"password_reset:{dto.Email}",code, cacheOptions, cancellationToken);
-        
-        
-        return Ok(new { Message = "Password reset email sent successfully!" });
+        if (!Guid.TryParse(Request.Headers["X-User-Id"], out Guid userId))
+            return Unauthorized();
+
+        var user = await _reglogService.FindUserByIdAsync(userId, false, ctoken);
+        if (user == null) return NotFound();
+
+        await _reglogService.RevokeAllSessionsAsync(user.Email, ctoken);
+        Response.Cookies.Delete("refreshToken");
+        return Ok(new { Message = "Все сессии аннулированы." });
     }
-    [HttpPost("verifycode")]
-    public async Task<IActionResult> VerifyCode([FromBody] VerifyCodeDto dto, CancellationToken cancellationToken = default)
+    
+    [HttpPost("requestresetpassword")]
+    public async Task<IActionResult> RequestPasswordReset([FromBody] RequestPasswordResetDto dto, CancellationToken cancellationToken = default)
     {
-        var cachedCode = await _cache.GetStringAsync($"password_reset:{dto.Email}", cancellationToken);;
-        if (cachedCode == null || cachedCode != dto.Code)
-        {
+        var user = await _reglogService.FindUserByEmailAsync(dto.Email, true, cancellationToken);
+        if (user == null) return NotFound(new { Message = "No user found." });
+        
+        var resetResult = await _reglogService.RequestPasswordResetAsync(user, cancellationToken);
+        if (!resetResult.Success) return BadRequest(new { Message = resetResult.ErrorMessage });
+
+        await _reglogService.SaveResetCodeAsync(dto.Email, resetResult.Data);
+        return Ok(new { Message = "Password reset email sent!" });
+    }
+
+    [HttpPost("verifycodepasswordreset")]
+    public async Task<IActionResult> VerifyCodePasswordReset([FromBody] VerifyCodeDto dto, CancellationToken cancellationToken = default)
+    {
+        if (!await _reglogService.VerifyResetCodeAsync(dto.Email, dto.Code))
             return BadRequest(new { Message = "Invalid or expired code." });
-        }
-        await _cache.RemoveAsync($"password_reset:{dto.Email}", cancellationToken);;
+
         string resetToken = Guid.NewGuid().ToString("N");
+        await _reglogService.SaveVerifiedTokenAsync(dto.Email, resetToken);
         
-        await _cache.SetStringAsync($"verified_token:{dto.Email}", resetToken, new DistributedCacheEntryOptions
-        {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5)
-        }, cancellationToken);
-        
-        return Ok(new { Message = "Code verified successfully!", Token = resetToken });
+        return Ok(new { Message = "Code verified!", Token = resetToken });
     }
 
     [HttpPost("confirmresetpassword")]
-    public async Task<IActionResult> ConfirmPasswordReset([FromBody] ConfirmResetPasswordDto dto,CancellationToken cancellationToken = default)
+    public async Task<IActionResult> ConfirmPasswordReset([FromBody] ConfirmResetPasswordDto dto, CancellationToken cancellationToken = default)
     {
-        string cachedToken = await _cache.GetStringAsync($"verified_token:{dto.Email}", cancellationToken);
-        if (cachedToken == null || cachedToken != dto.Token){
+        if (!await _reglogService.VerifyResetTokenAsync(dto.Email, dto.Token))
             return BadRequest(new { Message = "Invalid or expired token." });
-        }
-        await  _cache.RemoveAsync($"verified_token:{dto.Email}", cancellationToken);
         
-        var user = await _reglogService.FindUserByEmailAsync(dto.Email,true,cancellationToken);;
-        if (user == null)
-        {
-            return NotFound(new { Message = "User not found." });
-        }
-        await _reglogService.ChangePasswordAsync(user, dto.NewPassword, cancellationToken);
+        var user = await _reglogService.FindUserByEmailAsync(dto.Email, true, cancellationToken);
+        if (user == null) return NotFound();
+
+        var passwordResult = await _reglogService.ChangePasswordAsync(user, dto.NewPassword, cancellationToken);
+        if (!passwordResult.Success) return BadRequest(new { Message = passwordResult.ErrorMessage });
+
+        await _reglogService.RevokeAllSessionsAsync(user.Email, cancellationToken);
         return Ok(new { Message = "Password reset successfully!" }); 
     }
-    
-    
-    
-    
-    
+
+    public record class ConfirmRegisterDto(string Email, string Code);
     public record class RequestPasswordResetDto(string Email);
     public record VerifyCodeDto(string Email, string Code);
     public record ConfirmResetPasswordDto(string Email, string Token, string NewPassword);
