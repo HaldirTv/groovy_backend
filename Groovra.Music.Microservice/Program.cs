@@ -18,7 +18,7 @@ builder.Services.AddOpenApi(options =>
         // подставлял хост Gateway (https://localhost:7005).
         document.Servers = new List<OpenApiServer>
         {
-            new OpenApiServer { Url = "/" } 
+            new OpenApiServer { Url = "/" }
         };
         return Task.CompletedTask;
     });
@@ -28,20 +28,18 @@ builder.Services.AddOpenApi(options =>
 builder.Services.AddDbContext<MusicDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Register services (scoped per-request)
+// Сервисы регистрации
 builder.Services.AddScoped<UploadService>();
 builder.Services.AddScoped<MusicService>();
 
 builder.Services.AddGrpcClient<UserNameGrpcService.UserNameGrpcServiceClient>(o =>
 {
-    // Возьми этот URL из appsettings.json, либо захардкодь для локальной разработки
-    o.Address = new Uri(builder.Configuration["AuthGrpcUrl"] ?? "https://localhost:7008"); 
-    
+    o.Address = new Uri(builder.Configuration["AuthGrpcUrl"] ?? "https://localhost:7008");
+
 }).ConfigurePrimaryHttpMessageHandler(() =>
 {
     var handler = new HttpClientHandler();
-    // Отключаем паранойю по поводу локальных сертификатов
-    handler.ServerCertificateCustomValidationCallback = 
+    handler.ServerCertificateCustomValidationCallback =
         HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
     return handler;
 });
@@ -60,8 +58,6 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
 
-// Serve stored media files as static content (for local dev).
-// In production, replace with a CDN or dedicated file-serving middleware.
 // Находим правильный абсолютный путь
 var basePathConfig = builder.Configuration["MediaStorage:BasePath"];
 string mediaPath = string.IsNullOrWhiteSpace(basePathConfig)
@@ -84,8 +80,10 @@ if (!Directory.Exists(coversPath))
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(coversPath),
-    RequestPath  = "/music/files/covers"
+    RequestPath = "/music/files/covers"
 });
 
 
 app.Run();
+
+public partial class Program { }

@@ -46,26 +46,27 @@ public class UploadController : ControllerBase
             return BadRequest(new { Error = "An audio file must be provided." });
 
         // ── 2. Читаем заголовки шлюза (кто делает запрос) ──────────────────
-        var userIdString = Request.Headers["X-User-Id"].ToString();
-        var userRole = Request.Headers["X-User-Role"].ToString();
+        // var userIdString = Request.Headers["X-User-Id"].ToString();
+        // var userRole = Request.Headers["X-User-Role"].ToString();
 
-        if (!Guid.TryParse(userIdString, out Guid currentUserId))
-        {
-            return Unauthorized(new { Error = "User ID missing or invalid in Gateway headers." });
-        }
+        // if (!Guid.TryParse(userIdString, out Guid currentUserId))
+        // {
+        //     return Unauthorized(new { Error = "User ID missing or invalid in Gateway headers." });
+        // }
 
         // ── 3. Проверка общих прав ──────────────────────────────────────────
-        if (userRole != "Artist" && userRole != "Admin")
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { Error = "Only Artists or Admins can upload tracks." });
-        }
+        // if (userRole != "Artist" && userRole != "Admin")
+        // {
+        //     return StatusCode(StatusCodes.Status403Forbidden, new { Error = "Only Artists or Admins can upload tracks." });
+        // }
 
-        // Эти переменные пойдут в базу данных
-        Guid finalOwnerId;
-        string finalArtistName;
+        // Временно мокаем пользователя для тестирования без авторизации
+        Guid currentUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        Guid finalOwnerId = currentUserId;
+        string finalArtistName = "Test Artist";
 
         // ── 4. Исправленная логика gRPC и определения владельца ─────────────
-
+        /*
         // Сценарий А: Запрос делает Админ И он указал, для какого артиста загружает трек
         if (userRole == "Admin" && dto.TargetUserId.HasValue)
         {
@@ -108,6 +109,7 @@ public class UploadController : ControllerBase
                 return StatusCode(StatusCodes.Status500InternalServerError, new { Error = "Auth service unavailable." });
             }
         }
+        */
 
 
         try

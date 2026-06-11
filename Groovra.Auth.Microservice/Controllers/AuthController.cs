@@ -1,4 +1,4 @@
-﻿using Groovra.Auth.Microservice.DTOs;
+using Groovra.Auth.Microservice.DTOs;
 using Groovra.Auth.Microservice.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,11 +15,6 @@ public class AuthController : ControllerBase
         _reglogService = reglogService;
     }
 
-    [HttpGet("test")]
-    public IActionResult Test()
-    {
-        return Ok(new { Message = "Auth Microservice is running successfully!" });
-    }
 
     [HttpPost("register")]
     public async Task<IActionResult> Register(RegisterDto dto)
