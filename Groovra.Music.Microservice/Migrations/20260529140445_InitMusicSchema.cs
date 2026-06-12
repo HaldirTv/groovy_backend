@@ -29,7 +29,9 @@ namespace Groovra.Music.Microservice.Migrations
                     ContentType = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                     AudioRelativePath = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: false),
                     CoverImageRelativePath = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    UploadedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    UploadedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UserId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),  // ← добавь
+                   
                 },
                 constraints: table =>
                 {

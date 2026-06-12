@@ -17,22 +17,33 @@ builder.Services.AddReverseProxy()
         {
             var user = transformContext.HttpContext.User;
 
+            
             transformContext.ProxyRequest.Headers.Remove("X-User-Id");
-            transformContext.ProxyRequest.Headers.Remove("X-User-IsPremium");
+            transformContext.ProxyRequest.Headers.Remove("X-User-Name");
             transformContext.ProxyRequest.Headers.Remove("X-User-Role");
+
             if (user.Identity?.IsAuthenticated == true)
             {
-
                 var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier) ?? user.FindFirst("sub");
-                var isPremiumClaim = user.FindFirst("is_premium")?.Value ?? "false";
-                var roleClaim = user.FindFirst(ClaimTypes.Role) ?? user.FindFirst("role");
-            
+                var userNameClaim = user.FindFirst(ClaimTypes.Name) ?? user.FindFirst("name");
+
                 if (userIdClaim != null && !string.IsNullOrEmpty(userIdClaim.Value))
                 {
                     
+                    var roleClaims = user.Claims
+                        .Where(c => c.Type == ClaimTypes.Role || c.Type == "role")
+                        .Select(c => c.Value)
+                        .ToList();
+
+                    if (!roleClaims.Any()) 
+                        roleClaims.Add("Listener");
+
+                    string rolesValue = string.Join(",", roleClaims);
+
+          
                     transformContext.ProxyRequest.Headers.Add("X-User-Id", userIdClaim.Value);
-                    transformContext.ProxyRequest.Headers.Add("X-User-IsPremium", isPremiumClaim);
-                    transformContext.ProxyRequest.Headers.Add("X-User-Role", roleClaim?.Value ?? "Listener");
+                    transformContext.ProxyRequest.Headers.Add("X-User-Name", userNameClaim?.Value ?? "");
+                    transformContext.ProxyRequest.Headers.Add("X-User-Role", rolesValue);
                 }
             }
             await Task.CompletedTask;
