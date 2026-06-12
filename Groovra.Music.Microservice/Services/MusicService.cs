@@ -110,7 +110,7 @@ public class MusicService
         }
 
 
-        if (track.UserId != currentUserId && userRole != "Admin")
+        if (track.UserId != currentUserId && userRole.Contains("Admin") == false)
         {
             _logger.LogWarning("Security violation: Юзер {UserId} с ролью {Role} пытался удалить чужой трек {TrackId}", 
                 currentUserId, userRole, trackId);
@@ -156,7 +156,7 @@ public class MusicService
         }
         if (string.IsNullOrWhiteSpace(newTitle))
             throw new ArgumentException("New title cannot be empty.", nameof(newTitle));
-        if(track.UserId != currentUserId && userRole != "Admin")
+        if(track.UserId != currentUserId && userRole.Contains("Admin") == false)
             throw new UnauthorizedAccessException("You do not have permission to rename this track.");
 
         var oldTitle = track.Title;

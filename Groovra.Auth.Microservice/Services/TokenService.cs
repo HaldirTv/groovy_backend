@@ -20,7 +20,8 @@ public class TokenService
         var claims = new List<Claim>
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Email, user.Email)
+            new Claim(ClaimTypes.Email, user.Email),
+            new Claim(ClaimTypes.Name,user.Username)
         };
         // Добавляем только роли из таблицы Roles
         foreach (var role in user.Roles)

@@ -48,14 +48,14 @@ public class UploadController : ControllerBase
         // ── 2. Читаем заголовки шлюза (кто делает запрос) ──────────────────
         var userIdString = Request.Headers["X-User-Id"].ToString();
         var userRole = Request.Headers["X-User-Role"].ToString();
-
+        var userName = Request.Headers["X-User-Name"].ToString();
         if (!Guid.TryParse(userIdString, out Guid currentUserId))
         {
             return Unauthorized(new { Error = "User ID missing or invalid in Gateway headers." });
         }
 
         // ── 3. Проверка общих прав ──────────────────────────────────────────
-        if (userRole != "Artist" && userRole != "Admin")
+        if (userRole.Contains("Artist") == false && userRole.Contains("Admin") == false)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { Error = "Only Artists or Admins can upload tracks." });
         }
@@ -67,7 +67,7 @@ public class UploadController : ControllerBase
         // ── 4. Исправленная логика gRPC и определения владельца ─────────────
 
         // Сценарий А: Запрос делает Админ И он указал, для какого артиста загружает трек
-        if (userRole == "Admin" && dto.TargetUserId.HasValue)
+        if (userRole.Contains("Admin") == true && dto.TargetUserId.HasValue)
         {
             finalOwnerId = dto.TargetUserId.Value; // Трек запишется на этого артиста!
 
@@ -93,20 +93,8 @@ public class UploadController : ControllerBase
         else
         {
             finalOwnerId = currentUserId; // Владелец — тот, кто нажал кнопку
+            finalArtistName = userName; // Имя берем из заголовков шлюза, там уже должно быть реальное имя артиста
 
-            try
-            {
-                // Запрашиваем имя текущего пользователя
-                var grpcRequest = new UserNameGrpcRequest { UserId = userIdString };
-                var grpcResponse = await _grpcClient.GetUserNameGrpcAsync(grpcRequest, cancellationToken: cancellationToken);
-
-                finalArtistName = grpcResponse.Username;
-            }
-            catch (Grpc.Core.RpcException ex)
-            {
-                _logger.LogError(ex, "gRPC call failed for current user.");
-                return StatusCode(StatusCodes.Status500InternalServerError, new { Error = "Auth service unavailable." });
-            }
         }
 
 
