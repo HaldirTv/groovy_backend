@@ -10,7 +10,7 @@ public class UploadTrackRequestDto
     public string Title { get; set; } = string.Empty;
 
     /// <summary>Artist name (display name, not tied to Artist profile yet).</summary>
-    public string ArtistName { get; set; } = string.Empty;
+    public string? ArtistName { get; set; } = string.Empty;
 
     /// <summary>Optional album name.</summary>
     public string? Album { get; set; }
