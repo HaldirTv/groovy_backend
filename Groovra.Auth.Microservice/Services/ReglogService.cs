@@ -1,6 +1,7 @@
 using Groovra.Auth.Microservice.Data; 
 using Groovra.Auth.Microservice.DTOs;
 using Groovra.Auth.Microservice.Models;
+using Groovra.Shared.ServiceResult;
 using Microsoft.EntityFrameworkCore;
 
 namespace Groovra.Auth.Microservice.Services;

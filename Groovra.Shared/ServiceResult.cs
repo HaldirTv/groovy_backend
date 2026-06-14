@@ -1,3 +1,5 @@
+namespace Groovra.Shared.ServiceResult;
+
 public class ServiceResult<T>
 {
     public bool Success { get; set; }
