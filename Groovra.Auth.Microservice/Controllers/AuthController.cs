@@ -2,7 +2,7 @@
 using Groovra.Auth.Microservice.DTOs;
 using Groovra.Auth.Microservice.Services;
 using Microsoft.AspNetCore.Mvc;
-
+using Groovra.Shared.ServiceResult;
 namespace Groovra.Auth.Microservice.Controllers;
 
 [ApiController]

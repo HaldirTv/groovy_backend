@@ -26,6 +26,9 @@
     <PackageReference Include="Scalar.AspNetCore" Version="2.14.14" />
   </ItemGroup>
   <ItemGroup>
-    <Protobuf Include="..\Proto\username.proto" GrpcServices="Server" Link="Protos\username.proto" />
+    <Protobuf Include="..\Protos\username.proto" GrpcServices="Server" Link="Protos\username.proto" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Groovra.Shared\Groovra.Shared.csproj" />
   </ItemGroup>
 </Project>

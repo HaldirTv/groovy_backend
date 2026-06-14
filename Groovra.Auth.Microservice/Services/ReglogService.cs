@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Groovra.Auth.Microservice.Data; 
 using Groovra.Auth.Microservice.DTOs;
 using Groovra.Auth.Microservice.Models;
+using Groovra.Shared.ServiceResult;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
 

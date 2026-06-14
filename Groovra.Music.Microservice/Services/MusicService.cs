@@ -1,6 +1,7 @@
 using Groovra.Music.Microservice.Model;
 using Microsoft.EntityFrameworkCore;
-
+using Groovra.Shared.Extensions;
+using Groovra.Shared.Constants;
 namespace Groovra.Music.Microservice.Services;
 
 /// <summary>
@@ -97,7 +98,7 @@ public class MusicService
 
     public async Task<bool> DeleteTrackAsync(Guid trackId, 
         Guid currentUserId, 
-        string userRole, 
+        string userRoles, 
         CancellationToken cancellationToken)
     {
         // Исправлено: ищем по правильному trackId
@@ -110,10 +111,10 @@ public class MusicService
         }
 
 
-        if (track.UserId != currentUserId && userRole.Contains("Admin") == false)
+        if (track.UserId != currentUserId && userRoles.HasRole(AppRoles.Admin) == false)
         {
             _logger.LogWarning("Security violation: Юзер {UserId} с ролью {Role} пытался удалить чужой трек {TrackId}", 
-                currentUserId, userRole, trackId);
+                currentUserId, userRoles, trackId);
             
             throw new UnauthorizedAccessException("You do not have permission to delete this track.");
         }
@@ -144,7 +145,7 @@ public class MusicService
         Guid id,
         string newTitle,
         Guid currentUserId, 
-        string userRole, 
+        string userRoles, 
         CancellationToken cancellationToken = default)
     {
         var track = await _db.Tracks.FindAsync([id], cancellationToken);
@@ -156,7 +157,7 @@ public class MusicService
         }
         if (string.IsNullOrWhiteSpace(newTitle))
             throw new ArgumentException("New title cannot be empty.", nameof(newTitle));
-        if(track.UserId != currentUserId && userRole.Contains("Admin") == false)
+        if(track.UserId != currentUserId && userRoles.HasRole(AppRoles.Admin) == false)
             throw new UnauthorizedAccessException("You do not have permission to rename this track.");
 
         var oldTitle = track.Title;
