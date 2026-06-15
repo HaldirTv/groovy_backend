@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Groovra.Auth.Microservice.Data; 
 using Groovra.Auth.Microservice.DTOs;
 using Groovra.Auth.Microservice.Models;
+using Groovra.Shared.Constants;
 using Groovra.Shared.ServiceResult;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
@@ -33,6 +34,9 @@ public class ReglogService
         {
             return ServiceResult<bool>.Fail("Email already exists");
         }
+        var nicknameExist = await _context.Users.AnyAsync(u => u.Username == registerUserDto.Username, token);
+        if (nicknameExist) return ServiceResult<bool>.Fail("Username already exists");
+        
         
         string? existing = await _cache.GetStringAsync(pendingKey, token);
         if (existing != null)
@@ -99,16 +103,16 @@ public class ReglogService
             return ServiceResult<User>.Fail("Invalid confirmation code");
         }
     
-        bool isArtist = pendingUser.Role.Equals("Artist", StringComparison.OrdinalIgnoreCase);
+        bool isArtist = string.Equals(pendingUser.Role, AppRoles.Artist, StringComparison.OrdinalIgnoreCase);;
         List<Role> roles = new();
     
         if (isArtist)
         {
-            Role? artistRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "Artist", token);
+            Role? artistRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == AppRoles.Artist, token);
             if (artistRole != null) roles.Add(artistRole);
         }
     
-        Role? listenerRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "Listener", token);
+        Role? listenerRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == AppRoles.Listener, token);
         if (listenerRole != null) roles.Add(listenerRole);
         
         var user = new User
@@ -210,8 +214,22 @@ public class ReglogService
         await _cache.RemoveAsync(devicesKey, ctoken);
     }
 
+    public async Task RevokeSessionAsync(string email,string deviceId,CancellationToken ctoken = default)
+    {
+        string devicesKey = $"user_devices:{email}";
+        string? json = await _cache.GetStringAsync(devicesKey, ctoken);
+        
+        if (!string.IsNullOrEmpty(json))
+        {
+            var devices = JsonSerializer.Deserialize<List<string>>(json) ?? new();
+            devices.Remove(deviceId);
+            await _cache.SetStringAsync(devicesKey, JsonSerializer.Serialize(devices), ctoken);
+        }
+        
+        await _cache.RemoveAsync($"refresh:{email}:{deviceId}", ctoken);
+    }
     
-    public async Task<string> CreateSessionAsync(string email, string deviceId, CancellationToken token)
+    public async Task<string> CreateSessionAsync(string email, string deviceId = "default_web_client", CancellationToken token = default)
     {
         string refreshToken = Guid.NewGuid().ToString("N");
         string cacheKey = $"refresh:{email}:{deviceId}";
@@ -248,12 +266,7 @@ public class ReglogService
             
         return ServiceResult<string>.Ok(savedToken);
     }
-
-    // Для Logout: удаление одной сессии
-    public async Task RemoveSessionAsync(string email, string deviceId)
-    {
-        await _cache.RemoveAsync($"refresh:{email}:{deviceId}");
-    }
+    
 
     // Для Password Reset: хранение и проверка кодов/токенов
     public async Task SaveResetCodeAsync(string email, string code)
