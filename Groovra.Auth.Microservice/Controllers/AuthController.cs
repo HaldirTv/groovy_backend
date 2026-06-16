@@ -1,8 +1,14 @@
 ﻿using System.Text.Json;
+using Google.Apis.Auth;
+using Google.Apis.Auth.OAuth2.Flows;
 using Groovra.Auth.Microservice.DTOs;
 using Groovra.Auth.Microservice.Services;
 using Microsoft.AspNetCore.Mvc;
 using Groovra.Shared.ServiceResult;
+using Google.Apis.Auth;
+using Google.Apis.Auth.OAuth2; 
+using Google.Apis.Auth.OAuth2.Flows;
+using Google.Apis.Auth.OAuth2.Responses;
 namespace Groovra.Auth.Microservice.Controllers;
 
 [ApiController]
@@ -11,11 +17,13 @@ public class AuthController : ControllerBase
 {
     private readonly ReglogService _reglogService;
     private readonly TokenService _tokenService;
-
-    public AuthController(ReglogService reglogService, TokenService tokenService)  
+    private readonly IConfiguration _configuration;
+    public AuthController(ReglogService reglogService, TokenService tokenService, IConfiguration configuration)   
     {
         _reglogService = reglogService;
         _tokenService = tokenService;
+        _configuration = configuration;
+        
     }
 
     [HttpGet("test")]
@@ -71,6 +79,65 @@ public class AuthController : ControllerBase
         return Ok(new { Message = "User logged in successfully!", Token = _tokenService.GenerateToken(user) });
     }
 
+    [HttpPost("google")]
+    public async Task<IActionResult> GoogleAuth([FromBody] GoogleLoginDto dto, CancellationToken ctoken)
+    {
+        try
+        {
+            
+            var flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
+            {
+                
+                ClientSecrets = new ClientSecrets 
+                {
+                    ClientId = _configuration["Authentication:Google:ClientId"],
+                    ClientSecret = _configuration["Authentication:Google:ClientSecret"]
+                }
+            });
+
+           
+            TokenResponse tokenResponse = await flow.ExchangeCodeForTokenAsync(
+                userId: "user",
+                code: dto.Code,
+                redirectUri: _configuration["Authentication:Google:RedirectUri"], 
+                ctoken
+            );
+
+            
+            var payload = await GoogleJsonWebSignature.ValidateAsync(tokenResponse.IdToken);
+            
+            
+            var result = await _reglogService.LoginOrRegisterGoogleUserAsync(payload.Email, payload.Name, ctoken);
+            if (!result.Success) return BadRequest(new { Message = result.ErrorMessage });
+
+            var user = result.Data;
+            string deviceId = string.IsNullOrWhiteSpace(dto.DeviceId) ? "default_web_client" : dto.DeviceId;
+            
+            
+            string refreshToken = await _reglogService.CreateSessionAsync(user.Email, deviceId, ctoken);
+            
+            Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions 
+            { 
+                HttpOnly = true, 
+                Secure = true, 
+                SameSite = SameSiteMode.None, 
+                Expires = DateTimeOffset.UtcNow.AddDays(30) 
+            });
+
+            return Ok(new { 
+                Message = "User authenticated via Google successfully!", 
+                Token = _tokenService.GenerateToken(user) 
+            });
+        }
+        catch (TokenResponseException tokenEx)
+        {
+            return BadRequest(new { Message = "Ошибка обмена кода Google. Проверьте redirectUri.", Details = tokenEx.Message });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { Message = "Google Auth failed.", Details = ex.Message });
+        }
+    }
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh([FromBody] RefreshRequestDto dto)
     {
@@ -142,6 +209,19 @@ public class AuthController : ControllerBase
 
          await _reglogService.RevokeSessionAsync(user.Email, dto.DeviceId ?? "default_web_client", ctoken);
          return Ok(new { Message = "Сесія видалена." });
+    }
+    
+    [HttpGet("sessions")]
+    public async Task<IActionResult> GetSessions(CancellationToken ctoken)
+    {
+        if (!Guid.TryParse(Request.Headers["X-User-Id"], out Guid userId))
+            return Unauthorized();
+
+        var user = await _reglogService.FindUserByIdAsync(userId, false, ctoken);
+        if (user == null) return NotFound();
+
+        var sessions = await _reglogService.GetActiveSessionsAsync(user.Email, ctoken);
+        return Ok(new { Sessions = sessions });
     }
     
     

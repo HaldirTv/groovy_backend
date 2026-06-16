@@ -24,7 +24,7 @@ public class ReglogService
         _emailService = emailService;
         _cache = cache;
     }
-
+    //Register/Login
     public async Task<ServiceResult<bool>> RegisterUnVerifiedAsync(RegisterDto registerUserDto, CancellationToken token = default)
     {
         var emailExists = await _context.Users.AnyAsync(u => u.Email == registerUserDto.Email, token);
@@ -156,7 +156,60 @@ public class ReglogService
     
         return ServiceResult<User>.Ok(user); 
     }
+    //----------------------------------------
     
+    //Google oauth2
+    public async Task<ServiceResult<User>> LoginOrRegisterGoogleUserAsync(string email, string username, CancellationToken token = default)
+    {
+  
+        var user = await _context.Users
+            .Include(u => u.Roles)
+            .FirstOrDefaultAsync(u => u.Email == email, token);
+
+        if (user != null)
+        {
+      
+            return ServiceResult<User>.Ok(user);
+        }
+
+   
+        Role? listenerRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == AppRoles.Listener, token);
+    
+        user = new User
+        {
+            Email = email,
+            Username = await GenerateUniqueUsernameAsync(username, token),
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"))
+        };
+
+        if (listenerRole != null)
+        {
+            user.Roles.Add(listenerRole);
+        }
+
+        _context.Users.Add(user);
+        await _context.SaveChangesAsync(token);
+
+        return ServiceResult<User>.Ok(user);
+    }
+    private async Task<string> GenerateUniqueUsernameAsync(string baseName, CancellationToken token)
+    {
+        
+        string clean = new string(baseName.Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
+        clean = clean.Length > 40 ? clean[..40] : clean;
+        if (string.IsNullOrEmpty(clean)) clean = "user";
+
+       
+        string candidate = clean;
+        while (await _context.Users.AnyAsync(u => u.Username == candidate, token))
+        {
+            candidate = $"{clean}_{Random.Shared.Next(1000, 9999)}";
+        }
+
+        return candidate;
+    }
+    //----------------------------------------
+    //CHange password
     public async Task<ServiceResult<bool>> ChangePasswordAsync(User user, string OldPassword, string NewPassword, CancellationToken token = default)
     {
         if (!BCrypt.Net.BCrypt.Verify(OldPassword, user.PasswordHash))
@@ -170,6 +223,7 @@ public class ReglogService
         return ServiceResult<bool>.Ok(true);
     }
 
+    //Override without checking OldPAssword
     public async Task<ServiceResult<bool>> ChangePasswordAsync(User user, string NewPassword, CancellationToken token = default)
     {
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(NewPassword);
@@ -177,7 +231,10 @@ public class ReglogService
 
         return ServiceResult<bool>.Ok(true);
     }
-
+   
+    
+    //--------------------------------
+    
     public async Task<ServiceResult<string>> RequestPasswordResetAsync(User user, CancellationToken cancellationToken)
     {
         int number = Random.Shared.Next(100000, 999999);
@@ -197,6 +254,7 @@ public class ReglogService
         return ServiceResult<string>.Ok(number.ToString());
     }
 
+    //SESSIONS
     public async Task RevokeAllSessionsAsync(string email, CancellationToken ctoken = default)
     {
         string devicesKey = $"user_devices:{email}";
@@ -235,13 +293,13 @@ public class ReglogService
         string cacheKey = $"refresh:{email}:{deviceId}";
         string devicesKey = $"user_devices:{email}";
 
-        // Сохраняем токен
+
         await _cache.SetStringAsync(cacheKey, refreshToken, new DistributedCacheEntryOptions
         {
             AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(30)
         }, token);
 
-        // Обновляем список устройств (твоя авторская логика)
+  
         string? json = await _cache.GetStringAsync(devicesKey, token);
         List<string> devices = json != null 
             ? JsonSerializer.Deserialize<List<string>>(json) 
@@ -256,8 +314,18 @@ public class ReglogService
         return refreshToken;
     }
     
-    // Для Refresh: проверка токена
-    public async Task<ServiceResult<string>> ValidateRefreshTokenAsync(string email, string deviceId, string clientToken)
+    public async Task<List<string>> GetActiveSessionsAsync(string email, CancellationToken ctoken = default)
+    {
+        string devicesKey = $"user_devices:{email}";
+        string? json = await _cache.GetStringAsync(devicesKey, ctoken);
+        if (string.IsNullOrEmpty(json)) return new List<string>();
+        return JsonSerializer.Deserialize<List<string>>(json) ?? new();
+    }
+   //----------------------------
+  
+   
+   
+   public async Task<ServiceResult<string>> ValidateRefreshTokenAsync(string email, string deviceId, string clientToken)
     {
         string cacheKey = $"refresh:{email}:{deviceId}";
         string? savedToken = await _cache.GetStringAsync(cacheKey);
@@ -267,9 +335,11 @@ public class ReglogService
         return ServiceResult<string>.Ok(savedToken);
     }
     
-
-    // Для Password Reset: хранение и проверка кодов/токенов
-    public async Task SaveResetCodeAsync(string email, string code)
+  
+   
+   
+   //Save & Validate reset code and verified token for reset password
+   public async Task SaveResetCodeAsync(string email, string code)
     {
         await _cache.SetStringAsync($"password_reset:{email}", code, new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5) });
     }
@@ -282,6 +352,7 @@ public async Task<bool> VerifyResetCodeAsync(string email, string code)
     await _cache.RemoveAsync(key);
     return true;
 }
+
 
 public async Task SaveVerifiedTokenAsync(string email, string token)
 {
@@ -302,7 +373,7 @@ public async Task<bool> VerifyResetTokenAsync(string email, string token)
     
     
     
-    
+    //Find by smth
     public async Task<User?> FindUserByIdAsync(Guid userId, bool loadReference = true, CancellationToken token = default)
     {
         IQueryable<User> query = _context.Users;
