@@ -159,7 +159,13 @@ public class AuthController : ControllerBase
     {
         string deviceId = string.IsNullOrWhiteSpace(dto.DeviceId) ? "default_web_client" : dto.DeviceId;
         await _reglogService.RevokeSessionAsync(dto.Email, deviceId,ctoken);
-        Response.Cookies.Delete("refreshToken");
+        Response.Cookies.Delete("refreshToken", new CookieOptions 
+        { 
+            HttpOnly = true, 
+            Secure = true, 
+            SameSite = SameSiteMode.None,
+            Path = "/"
+        });
         return Ok(new { Message = "User logged out." });
     }
 
@@ -192,7 +198,13 @@ public class AuthController : ControllerBase
         if (user == null) return NotFound();
 
         await _reglogService.RevokeAllSessionsAsync(user.Email, ctoken);
-        Response.Cookies.Delete("refreshToken");
+        Response.Cookies.Delete("refreshToken", new CookieOptions 
+        { 
+            HttpOnly = true, 
+            Secure = true, 
+            SameSite = SameSiteMode.None,
+            Path = "/"
+        });
         return Ok(new { Message = "Все сессии аннулированы." });
     }
 
