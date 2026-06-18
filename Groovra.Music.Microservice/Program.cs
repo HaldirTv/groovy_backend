@@ -28,6 +28,8 @@ builder.Services.AddOpenApi(options =>
 builder.Services.AddDbContext<MusicDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+builder.Services.AddHttpClient();
+
 // Register services (scoped per-request)
 builder.Services.AddScoped<UploadService>();
 builder.Services.AddScoped<MusicService>();

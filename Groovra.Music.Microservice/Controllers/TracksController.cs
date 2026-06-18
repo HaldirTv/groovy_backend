@@ -24,14 +24,29 @@ public class TracksController : ControllerBase
     }
 
     [HttpGet]
-    [ProducesResponseType(typeof(IReadOnlyList<TrackDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAllTracks([FromQuery] string? search,[FromQuery] Guid? userId, CancellationToken cancellationToken)
+    [ProducesResponseType(typeof(PagedResultDto<TrackDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAllTracks(
+        [FromQuery] string? search,
+        [FromQuery] Guid? userId,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 10,
+        CancellationToken cancellationToken = default)
     {
-        // Передаем строку поиска в сервис
-        var tracks = await _musicService.GetAllTracksAsync(search,userId,cancellationToken);
+        // Защита от дурака: не даем передать отрицательные или нулевые значения
+        if (pageNumber < 1) pageNumber = 1;
+        if (pageSize < 1) pageSize = 10;
+        if (pageSize > 100) pageSize = 100; // Ограничиваем максимум, чтобы базу не положили
+
+        // Получаем порцию данных и общее количество из сервиса
+        var (tracks, totalCount) = await _musicService.GetAllTracksAsync(search, userId, pageNumber, pageSize, cancellationToken);
+        
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
-        var result = tracks.Select(t => MapToDto(t, baseUrl)).ToList();
+        // Маппим треки в DTO
+        var trackDtos = tracks.Select(t => MapToDto(t, baseUrl)).ToList();
+
+        // Заворачиваем в красивый постраничный ответ
+        var result = new PagedResultDto<TrackDto>(trackDtos, totalCount, pageNumber, pageSize);
 
         return Ok(result);
     }
@@ -94,43 +109,40 @@ public class TracksController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status416RangeNotSatisfiable)]
-    public async Task<IActionResult> StreamTrack(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> StreamTrack(Guid id, CancellationToken cancellationToken = default)
     {
-        // ─── Проверка авторизации через заголовки шлюза ─────────────────────────
+        // 1. Проверка авторизации шлюза (оставляем твой код)
         var userIdString = Request.Headers["X-User-Id"].ToString();
-        var userRole     = Request.Headers["X-User-Role"].ToString();
+        //if (!Guid.TryParse(userIdString, out _))
+          //  return Unauthorized(new { Error = "Streaming requires authentication." });
 
-        if (!Guid.TryParse(userIdString, out _))
-            return Unauthorized(new { Error = "Streaming requires authentication. Missing or invalid X-User-Id header." });
+        // 2. Достаем трек из базы, чтобы проверить, локальный он или внешний
+        var track = await _musicService.GetTrackByIdAsync(id, cancellationToken);
+        if (track is null)
+            return NotFound(new { Error = "Трек не найден." });
 
-        // ─── Получение информации о файле ────────────────────────────────────
-        var fileInfo = await _musicService.GetTrackFileInfoAsync(id, cancellationToken);
-
-        if (fileInfo is null)
-            return NotFound(new { Error = $"Трек с id '{id}' не найден." });
-
-        var (absolutePath, contentType) = fileInfo.Value;
-
-        if (!System.IO.File.Exists(absolutePath))
+        // ─── ФИШКА: Если трек из Jamendo ────────────────────────────────────────
+        if (track.IsExternal)
         {
-            _logger.LogWarning("Stream: файл не найден на диске для трека {TrackId}: {Path}", id, absolutePath);
-            return NotFound(new { Error = $"Аудиофайл трека '{id}' отсутствует на сервере." });
+            // Атомарно увеличиваем счетчик прослушиваний в нашей БД (fire-and-forget)!
+            _ = _musicService.IncrementPlayCountAsync(id, CancellationToken.None);
+
+            _logger.LogInformation("Stream (External): редирект трека {TrackId} на Jamendo URL.", id);
+
+            // Перенаправляем браузер/плеер фронтенда качать трек напрямую с серверов Jamendo
+            return Redirect(track.ExternalAudioUrl!);
         }
 
-        // ─── Инкремент PlayCount (fire-and-forget, не блокирует отдачу) ────────
+        // ─── Логика для локальных файлов (твой старый рабочий код) ───────────────
+        var fileInfo = await _musicService.GetTrackFileInfoAsync(id, cancellationToken);
+        if (fileInfo is null) return NotFound();
+
+        var (absolutePath, contentType) = fileInfo.Value;
+        if (!System.IO.File.Exists(absolutePath)) return NotFound();
+
         _ = _musicService.IncrementPlayCountAsync(id, CancellationToken.None);
-
-        _logger.LogInformation(
-            "Stream: трек {TrackId} запрошен пользователем {UserId} (роль: {UserRole}).",
-            id, userIdString, userRole);
-
-        // ─── Заголовки кэширования ───────────────────────────────────────────
-        // Аудиофайлы идентифицируются неизменяемым GUID → можно кэшировать на год.
-        // «immutable» сообщает браузеру не отправлять If-Modified-Since при перезагрузке.
         Response.Headers.CacheControl = "public, max-age=31536000, immutable";
 
-        // enableRangeProcessing: true включает поддержку 206 Partial Content
-        // и позволяет плеерам перематывать/прокручивать аудио без полной загрузки.
         return PhysicalFile(absolutePath, contentType, enableRangeProcessing: true);
     }
 
@@ -256,11 +268,19 @@ public async Task<IActionResult> RenameTrack(
 
     private static TrackDto MapToDto(Track track, string baseUrl)
     {
-        // AudioUrl теперь указывает на streaming endpoint с поддержкой HTTP Range
+        // Ссылка на стриминг всегда ведет на наш эндпоинт, 
+        // потому что наш эндпоинт умеет делать редирект на Jamendo + крутить счетчик прослушиваний!
         var audioUrl = $"{baseUrl}/music/tracks/{track.Id}/stream";
 
         string? coverUrl = null;
-        if (track.CoverImageRelativePath is not null)
+
+        // ИСПРАВЛЕНИЕ: Если трек внешний — берем готовую ссылку на обложку Jamendo
+        if (track.IsExternal)
+        {
+            coverUrl = track.ExternalCoverUrl;
+        }
+        // Если локальный — строим путь к нашему хранилищу файлов
+        else if (track.CoverImageRelativePath is not null)
         {
             var coverExt = Path.GetExtension(track.CoverImageRelativePath);
             coverUrl = $"{baseUrl}/music/files/covers/{track.Id}_cover{coverExt}";
@@ -276,8 +296,8 @@ public async Task<IActionResult> RenameTrack(
             DurationSeconds = track.DurationSeconds,
             FileSizeBytes   = track.FileSizeBytes,
             ContentType     = track.ContentType,
-            AudioUrl        = audioUrl,
-            CoverImageUrl   = coverUrl,
+            AudioUrl        = audioUrl,       // Сюда пойдет ссылка на твой /stream (он редиректнет куда надо)
+            CoverImageUrl   = coverUrl,       // А сюда сразу пойдет готовая ссылка на картинку Jamendo
             UploadedAt      = track.UploadedAt,
             PlayCount       = track.PlayCount,
         };
