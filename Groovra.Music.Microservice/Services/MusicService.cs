@@ -46,7 +46,7 @@ public class MusicService
     {   
         var query = _db.Tracks.AsQueryable();
 
-        // 1. Фильтрация по поисковому запросу
+
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
             query = query.Where(t => 
@@ -54,16 +54,16 @@ public class MusicService
                 t.ArtistName.Contains(searchTerm)); 
         }
 
-        // 2. Фильтрация по конкретному пользователю (если передано)
+
         if (userId.HasValue)
         {
             query = query.Where(t => t.UserId == userId.Value);
         }
 
-        // 3. Считаем общее количество подходящих записей ДО пагинации (важно для фронта!)
+
         var totalCount = await query.CountAsync(cancellationToken);
 
-        // 4. Применяем сортировку по популярности и берем нужный кусок (Skip / Take)
+ 
         var items = await query
             .OrderByDescending(t => t.PlayCount)
             .Skip((pageNumber - 1) * pageSize)
