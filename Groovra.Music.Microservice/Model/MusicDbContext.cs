@@ -21,23 +21,9 @@ public class MusicDbContext : DbContext
             entity.Property(t => t.Album).HasMaxLength(256);
             entity.Property(t => t.Genre).HasMaxLength(128);
             entity.Property(t => t.ContentType).HasMaxLength(128);
-            
-
-            entity.Property(t => t.AudioRelativePath).HasMaxLength(512); 
+            entity.Property(t => t.AudioRelativePath).IsRequired().HasMaxLength(512);
             entity.Property(t => t.CoverImageRelativePath).HasMaxLength(512);
-            
-            // Настраиваем новые поля для внешних треков
-            entity.Property(t => t.ExternalAudioUrl).HasMaxLength(1024);
-            entity.Property(t => t.ExternalCoverUrl).HasMaxLength(1024);
-            entity.Property(t => t.IsExternal).HasDefaultValue(false);
-
             entity.Property(t => t.PlayCount).IsRequired().HasDefaultValue(0L);
         });
-
-        base.OnModelCreating(modelBuilder);
-
-        
-
-        
     }
 }

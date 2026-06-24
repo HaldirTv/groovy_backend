@@ -56,6 +56,38 @@ namespace Groovra.Auth.Microservice.Migrations
                     b.ToTable("Artists", "auth");
                 });
 
+            modelBuilder.Entity("Groovra.Auth.Microservice.Models.Role", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Roles", "auth");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("11111111-1111-1111-1111-111111111111"),
+                            Name = "Listener"
+                        },
+                        new
+                        {
+                            Id = new Guid("22222222-2222-2222-2222-222222222222"),
+                            Name = "Artist"
+                        },
+                        new
+                        {
+                            Id = new Guid("33333333-3333-3333-3333-333333333333"),
+                            Name = "Admin"
+                        });
+                });
+
             modelBuilder.Entity("Groovra.Auth.Microservice.Models.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -67,25 +99,15 @@ namespace Groovra.Auth.Microservice.Migrations
 
                     b.Property<string>("Email")
                         .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<bool>("IsPremium")
-                        .HasColumnType("bit");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("PasswordHash")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<string>("Role")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Username")
                         .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
@@ -98,6 +120,21 @@ namespace Groovra.Auth.Microservice.Migrations
                     b.ToTable("Users", "auth");
                 });
 
+            modelBuilder.Entity("RoleUser", b =>
+                {
+                    b.Property<Guid>("RolesId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("UsersId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("RolesId", "UsersId");
+
+                    b.HasIndex("UsersId");
+
+                    b.ToTable("UserRoles", "auth");
+                });
+
             modelBuilder.Entity("Groovra.Auth.Microservice.Models.Artist", b =>
                 {
                     b.HasOne("Groovra.Auth.Microservice.Models.User", "User")
@@ -107,6 +144,21 @@ namespace Groovra.Auth.Microservice.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("RoleUser", b =>
+                {
+                    b.HasOne("Groovra.Auth.Microservice.Models.Role", null)
+                        .WithMany()
+                        .HasForeignKey("RolesId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Groovra.Auth.Microservice.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UsersId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Groovra.Auth.Microservice.Models.User", b =>

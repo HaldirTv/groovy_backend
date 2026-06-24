@@ -1,6 +1,7 @@
 using Groovra.Music.Microservice.Model;
 using Microsoft.EntityFrameworkCore;
-
+using Groovra.Shared.Extensions;
+using Groovra.Shared.Constants;
 namespace Groovra.Music.Microservice.Services;
 
 /// <summary>
@@ -30,22 +31,24 @@ public class MusicService
 
     // ─── GetAll ──────────────────────────────────────────────────────────────
 
+    // ─── GetAll (теперь с умным поиском) ─────────────────────────────────────
+
     /// <summary>
-    /// Возвращает треки. Если передан searchTerm, ищет частичное совпадение
-    /// по названию трека или имени артиста
+    /// Возвращает треки. Если передан searchTerm, ищет частичное совпадение 
+    /// по названию трека или имени артиста (как в YouTube).
     /// </summary>
     public async Task<IReadOnlyList<Track>> GetAllTracksAsync(string? searchTerm = null, Guid? userId = null, CancellationToken cancellationToken = default)
-    {
+    {   
         var query = _db.Tracks.AsQueryable();
 
         // Если юзер что-то ввел в поиск — фильтруем
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
-            query = query.Where(t =>
-                t.Title.Contains(searchTerm) ||
-                t.ArtistName.Contains(searchTerm));
+            query = query.Where(t => 
+                t.Title.Contains(searchTerm) || 
+                t.ArtistName.Contains(searchTerm)); 
         }
-        if (userId.HasValue)
+        if(userId.HasValue)
         {
             query = query.Where(t => t.UserId == userId.Value);
         }
@@ -91,11 +94,11 @@ public class MusicService
     }
 
     // ─── Delete ──────────────────────────────────────────────────────────────
+    
 
-
-    public async Task<bool> DeleteTrackAsync(Guid trackId,
-        Guid currentUserId,
-        string userRole,
+    public async Task<bool> DeleteTrackAsync(Guid trackId, 
+        Guid currentUserId, 
+        string userRoles, 
         CancellationToken cancellationToken)
     {
         // Исправлено: ищем по правильному trackId
@@ -108,11 +111,11 @@ public class MusicService
         }
 
 
-        if (track.UserId != currentUserId && userRole != "Admin")
+        if (track.UserId != currentUserId && userRoles.HasRole(AppRoles.Admin) == false)
         {
-            _logger.LogWarning("Security violation: Юзер {UserId} с ролью {Role} пытался удалить чужой трек {TrackId}",
-                currentUserId, userRole, trackId);
-
+            _logger.LogWarning("Security violation: Юзер {UserId} с ролью {Role} пытался удалить чужой трек {TrackId}", 
+                currentUserId, userRoles, trackId);
+            
             throw new UnauthorizedAccessException("You do not have permission to delete this track.");
         }
 
@@ -141,8 +144,8 @@ public class MusicService
     public async Task<Track?> RenameTrackAsync(
         Guid id,
         string newTitle,
-        Guid currentUserId,
-        string userRole,
+        Guid currentUserId, 
+        string userRoles, 
         CancellationToken cancellationToken = default)
     {
         var track = await _db.Tracks.FindAsync([id], cancellationToken);
@@ -154,7 +157,7 @@ public class MusicService
         }
         if (string.IsNullOrWhiteSpace(newTitle))
             throw new ArgumentException("New title cannot be empty.", nameof(newTitle));
-        if (track.UserId != currentUserId && userRole != "Admin")
+        if(track.UserId != currentUserId && userRoles.HasRole(AppRoles.Admin) == false)
             throw new UnauthorizedAccessException("You do not have permission to rename this track.");
 
         var oldTitle = track.Title;
@@ -180,20 +183,6 @@ public class MusicService
     /// <returns>True — счётчик обновлён; false — трек не найден.</returns>
     public async Task<bool> IncrementPlayCountAsync(Guid trackId, CancellationToken cancellationToken = default)
     {
-        if (_db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
-        {
-            var track = await _db.Tracks.FindAsync(new object[] { trackId }, cancellationToken);
-            if (track == null)
-            {
-                _logger.LogWarning("IncrementPlayCount: трек {TrackId} не найден.", trackId);
-                return false;
-            }
-            track.PlayCount++;
-            await _db.SaveChangesAsync(cancellationToken);
-            _logger.LogDebug("PlayCount увеличен для трека {TrackId} (InMemory).", trackId);
-            return true;
-        }
-
         var updated = await _db.Tracks
             .Where(t => t.Id == trackId)
             .ExecuteUpdateAsync(

@@ -89,7 +89,6 @@ public class TracksController : ControllerBase
     /// <response code="404">Трек или аудиофайл не найдены.</response>
     /// <response code="416">Запрошенный диапазон байт выходит за пределы файла.</response>
     [HttpGet("{id:guid}/stream")]
-    [HttpHead("{id:guid}/stream")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status206PartialContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
@@ -97,26 +96,42 @@ public class TracksController : ControllerBase
     [ProducesResponseType(StatusCodes.Status416RangeNotSatisfiable)]
     public async Task<IActionResult> StreamTrack(Guid id, CancellationToken cancellationToken)
     {
-        // Временно закомментирована проверка заголовков шлюза
-        // var userIdString = Request.Headers["X-User-Id"].ToString();
-        // if (!Guid.TryParse(userIdString, out _))
-        //     return Unauthorized(new { Error = "Streaming requires authentication. Missing or invalid X-User-Id header." });
+        // ─── Проверка авторизации через заголовки шлюза ─────────────────────────
+        var userIdString = Request.Headers["X-User-Id"].ToString();
+        var userRole     = Request.Headers["X-User-Role"].ToString();
 
+        if (!Guid.TryParse(userIdString, out _))
+            return Unauthorized(new { Error = "Streaming requires authentication. Missing or invalid X-User-Id header." });
+
+        // ─── Получение информации о файле ────────────────────────────────────
         var fileInfo = await _musicService.GetTrackFileInfoAsync(id, cancellationToken);
 
-        if (fileInfo is null || !System.IO.File.Exists(fileInfo.Value.AbsolutePath))
+        if (fileInfo is null)
+            return NotFound(new { Error = $"Трек с id '{id}' не найден." });
+
+        var (absolutePath, contentType) = fileInfo.Value;
+
+        if (!System.IO.File.Exists(absolutePath))
         {
-            _logger.LogWarning("Stream: файл не найден для трека {TrackId}", id);
-            return NotFound(new { Error = "Аудиофайл не найден." });
+            _logger.LogWarning("Stream: файл не найден на диске для трека {TrackId}: {Path}", id, absolutePath);
+            return NotFound(new { Error = $"Аудиофайл трека '{id}' отсутствует на сервере." });
         }
 
-        _ = _musicService.IncrementPlayCountAsync(id, CancellationToken.None); // Fire-and-forget
+        // ─── Инкремент PlayCount (fire-and-forget, не блокирует отдачу) ────────
+        _ = _musicService.IncrementPlayCountAsync(id, CancellationToken.None);
 
+        _logger.LogInformation(
+            "Stream: трек {TrackId} запрошен пользователем {UserId} (роль: {UserRole}).",
+            id, userIdString, userRole);
+
+        // ─── Заголовки кэширования ───────────────────────────────────────────
+        // Аудиофайлы идентифицируются неизменяемым GUID → можно кэшировать на год.
+        // «immutable» сообщает браузеру не отправлять If-Modified-Since при перезагрузке.
         Response.Headers.CacheControl = "public, max-age=31536000, immutable";
 
-        // Подготовка к Azure Blob Storage: используем абстрактный Stream
-        var stream = new FileStream(fileInfo.Value.AbsolutePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        return File(stream, fileInfo.Value.ContentType, enableRangeProcessing: true);
+        // enableRangeProcessing: true включает поддержку 206 Partial Content
+        // и позволяет плеерам перематывать/прокручивать аудио без полной загрузки.
+        return PhysicalFile(absolutePath, contentType, enableRangeProcessing: true);
     }
 
     // ─── DELETE /music/tracks/{id} ────────────────────────────────────────────

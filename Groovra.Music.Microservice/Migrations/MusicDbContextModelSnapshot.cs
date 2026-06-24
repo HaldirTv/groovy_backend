@@ -39,6 +39,7 @@ namespace Groovra.Music.Microservice.Migrations
                         .HasColumnType("nvarchar(256)");
 
                     b.Property<string>("AudioRelativePath")
+                        .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
 
@@ -54,25 +55,12 @@ namespace Groovra.Music.Microservice.Migrations
                     b.Property<double>("DurationSeconds")
                         .HasColumnType("float");
 
-                    b.Property<string>("ExternalAudioUrl")
-                        .HasMaxLength(1024)
-                        .HasColumnType("nvarchar(1024)");
-
-                    b.Property<string>("ExternalCoverUrl")
-                        .HasMaxLength(1024)
-                        .HasColumnType("nvarchar(1024)");
-
                     b.Property<long>("FileSizeBytes")
                         .HasColumnType("bigint");
 
                     b.Property<string>("Genre")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
-
-                    b.Property<bool>("IsExternal")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
 
                     b.Property<long>("PlayCount")
                         .ValueGeneratedOnAdd()
