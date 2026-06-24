@@ -7,7 +7,7 @@ public class MusicDbContext : DbContext
     public MusicDbContext(DbContextOptions<MusicDbContext> options) : base(options) { }
 
     public DbSet<Track> Tracks { get; set; }
-
+    public DbSet<FavoriteTrack> FavoriteTracks { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Все таблицы Music-сервиса живут в схеме [music] базы GroovraDB
