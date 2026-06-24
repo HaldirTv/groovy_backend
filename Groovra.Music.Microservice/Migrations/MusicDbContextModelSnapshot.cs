@@ -23,6 +23,33 @@ namespace Groovra.Music.Microservice.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoriteTrack", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("LikedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TrackId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TrackId");
+
+                    b.HasIndex("UserId", "TrackId")
+                        .IsUnique();
+
+                    b.ToTable("FavoriteTracks", "music");
+                });
+
             modelBuilder.Entity("Groovra.Music.Microservice.Model.Track", b =>
                 {
                     b.Property<Guid>("Id")
@@ -93,6 +120,17 @@ namespace Groovra.Music.Microservice.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Tracks", "music");
+                });
+
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoriteTrack", b =>
+                {
+                    b.HasOne("Groovra.Music.Microservice.Model.Track", "Track")
+                        .WithMany()
+                        .HasForeignKey("TrackId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Track");
                 });
 #pragma warning restore 612, 618
         }

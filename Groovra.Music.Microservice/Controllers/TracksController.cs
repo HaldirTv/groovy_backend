@@ -113,8 +113,8 @@ public class TracksController : ControllerBase
     {
         // 1. Проверка авторизации шлюза (оставляем твой код)
         var userIdString = Request.Headers["X-User-Id"].ToString();
-        //if (!Guid.TryParse(userIdString, out _))
-          //  return Unauthorized(new { Error = "Streaming requires authentication." });
+        if (!Guid.TryParse(userIdString, out _))
+            return Unauthorized(new { Error = "Streaming requires authentication." });
 
         // 2. Достаем трек из базы, чтобы проверить, локальный он или внешний
         var track = await _musicService.GetTrackByIdAsync(id, cancellationToken);

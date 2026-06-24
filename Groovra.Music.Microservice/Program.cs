@@ -33,7 +33,7 @@ builder.Services.AddHttpClient();
 // Register services (scoped per-request)
 builder.Services.AddScoped<UploadService>();
 builder.Services.AddScoped<MusicService>();
-
+builder.Services.AddScoped<FavoritesService>();
 builder.Services.AddGrpcClient<UserNameGrpcService.UserNameGrpcServiceClient>(o =>
 {
     // Возьми этот URL из appsettings.json, либо захардкодь для локальной разработки
