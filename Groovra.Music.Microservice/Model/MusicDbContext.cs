@@ -33,6 +33,16 @@ public class MusicDbContext : DbContext
 
             entity.Property(t => t.PlayCount).IsRequired().HasDefaultValue(0L);
         });
+        
+        modelBuilder.Entity<FavoriteTrack>(entity =>
+        {
+            entity.HasKey(f => f.Id);
+            entity.HasIndex(f => new { f.UserId, f.TrackId }).IsUnique();
+            entity.HasOne(f => f.Track)
+                .WithMany()
+                .HasForeignKey(f => f.TrackId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
 
         base.OnModelCreating(modelBuilder);
 
