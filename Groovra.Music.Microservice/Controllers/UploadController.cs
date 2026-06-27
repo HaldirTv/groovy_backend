@@ -1,5 +1,6 @@
 using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Services;
+using Groovra.Shared.Extensions;
 using Groovra.Shared.Grpc; // Подключаем пространство имен gRPC
 using Microsoft.AspNetCore.Mvc;
 
@@ -48,7 +49,7 @@ public class UploadController : ControllerBase
         // ── 2. Читаем заголовки шлюза (кто делает запрос) ──────────────────
         var userIdString = Request.Headers["X-User-Id"].ToString();
         var userRole = Request.Headers["X-User-Role"].ToString();
-        var userName = Request.Headers["X-User-Name"].ToString();
+        var userName = HttpContext.GetUserName();
         if (!Guid.TryParse(userIdString, out Guid currentUserId))
         {
             return Unauthorized(new { Error = "User ID missing or invalid in Gateway headers." });
