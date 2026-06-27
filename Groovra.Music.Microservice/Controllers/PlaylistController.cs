@@ -50,7 +50,7 @@ public class PlaylistsController : ControllerBase
         // ПРОВЕРКА ДОСТУПА В КОНТРОЛЛЕРЕ:
         // Если юзер смотрит свои плейлисты или он Админ - показываем всё (включая приватные).
         // Если смотрит чужие - только публичные.
-        bool includePrivate = (target == requesterId) || IsAdmin();
+        bool includePrivate = (target == requesterId) || HttpContext.UserIsInRole(AppRoles.Admin);
 
         var result = await _playlistService.GetUserPlaylistsAsync(target, includePrivate, cancellationToken);
 
@@ -69,7 +69,7 @@ public class PlaylistsController : ControllerBase
             return NotFound(new { message = "Плейлист не знайдено." });
 
         // ПРОВЕРКА ДОСТУПА В КОНТРОЛЛЕРЕ:
-        if (playlist.IsPrivate && playlist.UserId != requesterId && !IsAdmin())
+        if (playlist.IsPrivate && playlist.UserId != requesterId && !HttpContext.UserIsInRole(AppRoles.Admin))
             return NotFound(new { message = "Плейлист не знайдено." }); // Скрываем под 404, а не 403, чтобы не выдавать существование
 
         var result = await _playlistService.GetPlaylistByIdAsync(id, cancellationToken);
@@ -95,7 +95,7 @@ public class PlaylistsController : ControllerBase
             return NotFound(new { message = "Плейлист не знайдено." });
 
         // ПРОВЕРКА ДОСТУПА В КОНТРОЛЛЕРЕ:
-        if (playlist.UserId != requesterId && !IsAdmin())
+        if (playlist.UserId != requesterId && HttpContext.UserIsInRole(AppRoles.Admin) == false)
             return Forbid();
 
         var result = await _playlistService.UpdatePrivacyAsync(id, dto.IsPrivate, cancellationToken);
@@ -176,7 +176,7 @@ public class PlaylistsController : ControllerBase
             return NotFound(new { message = "Плейлист не знайдено." });
 
         // ПРОВЕРКА ДОСТУПА В КОНТРОЛЛЕРЕ:
-        if (playlist.UserId != requesterId && !IsAdmin())
+        if (playlist.UserId != requesterId && HttpContext.UserIsInRole(AppRoles.Admin) == false)
             return Forbid();
 
         var result = await _playlistService.ReorderTracksAsync(id, dto.OrderedTrackIds, cancellationToken);
@@ -199,7 +199,7 @@ public class PlaylistsController : ControllerBase
             return NotFound(new { message = "Плейлист не знайдено." });
 
         // ПРОВЕРКА ДОСТУПА В КОНТРОЛЛЕРЕ:
-        if (playlist.UserId != requesterId && !IsAdmin())
+        if (playlist.UserId != requesterId && HttpContext.UserIsInRole(AppRoles.Admin) == false)
             return Forbid();
 
         var result = await _playlistService.DeletePlaylistAsync(id, cancellationToken);
@@ -213,8 +213,7 @@ public class PlaylistsController : ControllerBase
     // ─── helpers ─────────────────────────────────────────────────────────────
 
     private bool TryGetUserId(out Guid userId) =>
-        Guid.TryParse(Request.Headers["X-User-Id"].ToString(), out userId);
+        HttpContext.TryGetUserId(out userId);
 
-    private bool IsAdmin() =>
-        Request.Headers["X-User-Role"].ToString().HasRole(AppRoles.Admin);
+
 }

@@ -1,6 +1,7 @@
 using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Model;
 using Groovra.Music.Microservice.Services;
+using Groovra.Shared.Extensions;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Groovra.Music.Microservice.Controllers;
@@ -112,8 +113,8 @@ public class TracksController : ControllerBase
     public async Task<IActionResult> StreamTrack(Guid id, CancellationToken cancellationToken = default)
     {
         // 1. Проверка авторизации шлюза (оставляем твой код)
-        var userIdString = Request.Headers["X-User-Id"].ToString();
-        if (!Guid.TryParse(userIdString, out _))
+        
+        if (!HttpContext.TryGetUserId(out _))
             return Unauthorized(new { Error = "Streaming requires authentication." });
 
         // 2. Достаем трек из базы, чтобы проверить, локальный он или внешний
@@ -162,10 +163,10 @@ public class TracksController : ControllerBase
     public async Task<IActionResult> DeleteTrack(Guid id, CancellationToken cancellationToken)
     {
 
-        var userIdString = Request.Headers["X-User-Id"].ToString();
+
         var userRole = Request.Headers["X-User-Role"].ToString();
 
-        if (!Guid.TryParse(userIdString, out Guid currentUserId))
+        if (!HttpContext.TryGetUserId(out var currentUserId))
             return Unauthorized(new { Error = "Invalid or missing user identity." });
 
         try
@@ -224,10 +225,10 @@ public async Task<IActionResult> RenameTrack(
         return BadRequest(new { Error = "New title cannot be empty." });
 
     // 2. Достаем данные юзера, которые шлюз (Gateway) бережно вытащил из JWT
-    var userIdString = Request.Headers["X-User-Id"].ToString();
+
     var userRole = Request.Headers["X-User-Role"].ToString();
 
-    if (!Guid.TryParse(userIdString, out Guid currentUserId))
+    if (!HttpContext.TryGetUserId(out var currentUserId))
     {
         return Unauthorized(new { Error = "User identity is missing or invalid." });
     }

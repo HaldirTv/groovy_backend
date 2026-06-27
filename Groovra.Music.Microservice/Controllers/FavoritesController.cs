@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Services;
+using Groovra.Shared.Extensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -20,13 +21,13 @@ public class FavoritesController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> LikeTrack([FromBody] LikeRequestDto dto)
     {
-        var userId = GetUserId();
+        
 
-        if (userId == null) 
+        if (TryGetUserId(out var userId) == false) 
             return Unauthorized(new { Error = "Streaming requires authentication." });
 
    
-        var result = await _favoritesService.AddToFavoritesAsync(userId.Value, dto.TrackId);
+        var result = await _favoritesService.AddToFavoritesAsync(userId, dto.TrackId);
         
         if (!result) 
             return BadRequest(new { message = "Не удалось добавить в избранное. Возможно, трека нет или он уже лайкнут." });
@@ -37,11 +38,11 @@ public class FavoritesController : ControllerBase
     [HttpDelete("{trackId:guid}")]
     public async Task<IActionResult> UnlikeTrack(Guid trackId)
     {
-        var userId = GetUserId();
-        if (userId == null) 
+
+        if (TryGetUserId(out var userId) == false) 
             return Unauthorized(new { Error = "Streaming requires authentication." });
         
-        var result = await _favoritesService.RemoveFromFavoritesAsync(userId.Value, trackId);
+        var result = await _favoritesService.RemoveFromFavoritesAsync(userId, trackId);
         
         if (!result) 
             return NotFound(new { message = "Трек не найден в избранном" });
@@ -52,23 +53,14 @@ public class FavoritesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetMyFavorites()
     {
-        var userId = GetUserId();
-        if (userId == null) 
+        
+        if (TryGetUserId(out var userId) == false) 
             return Unauthorized(new { Error = "Streaming requires authentication." });
 
-        var tracks = await _favoritesService.GetUserFavoriteTracksAsync(userId.Value);
+        var tracks = await _favoritesService.GetUserFavoriteTracksAsync(userId);
         return Ok(tracks);
     }
 
-    private Guid? GetUserId()
-    {
-        var userIdStr = Request.Headers["X-User-Id"].ToString();
-    
-        if (Guid.TryParse(userIdStr, out var userId))
-        {
-            return userId;
-        }
-    
-        return null;
-    }
+    private bool TryGetUserId(out Guid userId) =>
+        HttpContext.TryGetUserId(out userId);
 }
