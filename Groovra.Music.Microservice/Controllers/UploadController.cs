@@ -49,7 +49,7 @@ public class UploadController : ControllerBase
         // ── 2. Читаем заголовки шлюза (кто делает запрос) ──────────────────
         var userIdString = Request.Headers["X-User-Id"].ToString();
         var userRole = Request.Headers["X-User-Role"].ToString();
-        var userName = HttpContext.GetUserName();
+        var userName = Request.Headers["X-User-Name"].ToString();
         if (!Guid.TryParse(userIdString, out Guid currentUserId))
         {
             return Unauthorized(new { Error = "User ID missing or invalid in Gateway headers." });

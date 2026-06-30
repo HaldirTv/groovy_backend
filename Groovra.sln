@@ -1,5 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.7.11911.148 stable
+MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Groovra.Auth.Microservice", "Groovra.Auth.Microservice\Groovra.Auth.Microservice.csproj", "{329ED06D-285E-4A6D-B1AD-8873C1712B7F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Groovra.Music.Microservice", "Groovra.Music.Microservice\Groovra.Music.Microservice.csproj", "{FCA4CD0C-02BE-43DC-8374-77EDD4C008E0}"
@@ -83,5 +86,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {AEB53DE5-D845-4339-A103-3CD398F2997F}
 	EndGlobalSection
 EndGlobal

@@ -13,7 +13,7 @@ public class MusicDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        base.OnModelCreating(modelBuilder);
+        // Все таблицы Music-сервиса живут в схеме [music] базы GroovraDB
         modelBuilder.HasDefaultSchema("music");
 
         modelBuilder.Entity<Track>(entity =>
@@ -24,8 +24,7 @@ public class MusicDbContext : DbContext
             entity.Property(t => t.Album).HasMaxLength(256);
             entity.Property(t => t.Genre).HasMaxLength(128);
             entity.Property(t => t.ContentType).HasMaxLength(128);
-            
-            entity.Property(t => t.AudioRelativePath).HasMaxLength(512); 
+            entity.Property(t => t.AudioRelativePath).IsRequired().HasMaxLength(512);
             entity.Property(t => t.CoverImageRelativePath).HasMaxLength(512);
             
             entity.Property(t => t.ExternalAudioUrl).HasMaxLength(1024);

@@ -37,37 +37,24 @@ public class MusicService
     /// Возвращает треки. Если передан searchTerm, ищет частичное совпадение 
     /// по названию трека или имени артиста (как в YouTube).
     /// </summary>
-    public async Task<(IReadOnlyList<Track> Items, int TotalCount)> GetAllTracksAsync(
-        string? searchTerm = null, 
-        Guid? userId = null, 
-        int pageNumber = 1, 
-        int pageSize = 10, 
-        CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Track>> GetAllTracksAsync(string? searchTerm = null, Guid? userId = null, CancellationToken cancellationToken = default)
     {   
         var query = _db.Tracks.AsQueryable();
 
-
+        // Если юзер что-то ввел в поиск — фильтруем
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
             query = query.Where(t => 
                 t.Title.Contains(searchTerm) || 
                 t.ArtistName.Contains(searchTerm)); 
         }
-
-
-        if (userId.HasValue)
+        if(userId.HasValue)
         {
             query = query.Where(t => t.UserId == userId.Value);
         }
 
-
-        var totalCount = await query.CountAsync(cancellationToken);
-
- 
-        var items = await query
-            .OrderByDescending(t => t.PlayCount)
-            .Skip((pageNumber - 1) * pageSize)
-            .Take(pageSize)
+        return await query
+            .OrderByDescending(t => t.UploadedAt)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
