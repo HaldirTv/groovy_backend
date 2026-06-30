@@ -145,6 +145,7 @@ namespace Groovra.Music.Microservice.Migrations
                         .HasColumnType("nvarchar(256)");
 
                     b.Property<string>("AudioRelativePath")
+                        .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
 

@@ -24,4 +24,6 @@ public class User
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     
     public Artist? ArtistProfile { get; set; }
+
+    public Profile? Profile { get; set; }
 }

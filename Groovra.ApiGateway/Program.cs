@@ -22,13 +22,13 @@ builder.Services.AddReverseProxy()
             transformContext.ProxyRequest.Headers.Remove("X-User-Id");
             transformContext.ProxyRequest.Headers.Remove("X-User-Name");
             transformContext.ProxyRequest.Headers.Remove("X-User-Role");
-            
+
            
             if (user.Identity?.IsAuthenticated == true)
             {
                 var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier) ?? user.FindFirst("sub");
                 var userNameClaim = user.FindFirst(ClaimTypes.Name) ?? user.FindFirst("name");
-                
+
                 var encodedName = WebUtility.UrlEncode(userNameClaim?.Value ?? "");
                 if (userIdClaim != null && !string.IsNullOrEmpty(userIdClaim.Value))
                 {
@@ -45,7 +45,7 @@ builder.Services.AddReverseProxy()
 
           
                     transformContext.ProxyRequest.Headers.Add("X-User-Id", userIdClaim.Value);
-                    transformContext.ProxyRequest.Headers.Add("X-User-Name", encodedName);
+                    transformContext.ProxyRequest.Headers.Add("X-User-Name", userNameClaim?.Value ?? "");
                     transformContext.ProxyRequest.Headers.Add("X-User-Role", rolesValue);
                 }
             }

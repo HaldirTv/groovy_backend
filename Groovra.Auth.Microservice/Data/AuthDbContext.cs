@@ -10,6 +10,7 @@ public class AuthDbContext : DbContext
     public DbSet<User> Users { get; set; }
     public DbSet<Artist> Artists { get; set; }
     public DbSet<Role> Roles { get; set; }
+    public DbSet<Profile> Profiles { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -29,6 +30,15 @@ public class AuthDbContext : DbContext
             .HasOne(u => u.ArtistProfile)
             .WithOne(a => a.User)
             .HasForeignKey<Artist>(a => a.UserId);
+
+        modelBuilder.Entity<User>()
+            .HasOne(u => u.Profile)
+            .WithOne(p => p.User)
+            .HasForeignKey<Profile>(p => p.UserId);
+
+        modelBuilder.Entity<Profile>()
+            .Property(p => p.Bio)
+            .HasMaxLength(1000);
 
         // Обмеження Bio до 1000 символів
         modelBuilder.Entity<Artist>()

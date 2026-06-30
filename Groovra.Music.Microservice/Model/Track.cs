@@ -29,29 +29,19 @@ public class Track
     [MaxLength(128)]
     public string ContentType { get; set; } = string.Empty;
 
-    /// <summary>Флаг: загружен ли трек на наш сервер вручную или взят из внешнего API (Jamendo).</summary>
-    public bool IsExternal { get; set; } = false;
-
-    /// <summary>Прямой URL на внешний аудиопоток (заполняется только если IsExternal = true).</summary>
-    [MaxLength(1024)]
-    public string? ExternalAudioUrl { get; set; }
-
-    /// <summary>Прямой URL на внешнюю обложку (заполняется только если IsExternal = true).</summary>
-    [MaxLength(1024)]
-    public string? ExternalCoverUrl { get; set; }
-
-    /// <summary>Путь к аудио относительно MediaStorage (null для внешних треков).</summary>
+    /// <summary>Путь к аудио относительно MediaStorage (audio/&lt;guid&gt;.mp3).</summary>
     [MaxLength(512)]
-    public string? AudioRelativePath { get; set; } // Сделали nullable (?)
+    public string AudioRelativePath { get; set; } = string.Empty;
 
-    /// <summary>Путь к обложке относительно MediaStorage (null для внешних треков).</summary>
+    /// <summary>Путь к обложке (null, если не загружена).</summary>
     [MaxLength(512)]
-    public string? CoverImageRelativePath { get; set; } // Сделали nullable (?)
+    public string? CoverImageRelativePath { get; set; }
 
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
 
     [Required]
-    public Guid UserId { get; set; } // Для треков Jamendo можно зашить Guid системного администратора/бота
+    public Guid UserId { get; set; }
 
+    /// <summary>Количество прослушиваний трека.</summary>
     public long PlayCount { get; set; } = 0;
 }

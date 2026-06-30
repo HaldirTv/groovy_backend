@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 // 1. ИСПРАВЛЕННЫЙ USING:
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
+using Microsoft.Extensions.FileProviders;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -50,6 +51,18 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
     app.MapScalarApiReference();
 }
+
+var mediaPathConfig = builder.Configuration["MediaStorage:BasePath"];
+var mediaPath = string.IsNullOrWhiteSpace(mediaPathConfig)
+    ? Path.Combine(Directory.GetCurrentDirectory(), "MediaStorage")
+    : Path.GetFullPath(mediaPathConfig);
+
+Directory.CreateDirectory(mediaPath);
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(mediaPath),
+    RequestPath = "/media"
+});
 
 app.UseHttpsRedirection();
 
