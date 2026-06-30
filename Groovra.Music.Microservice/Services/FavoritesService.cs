@@ -54,4 +54,14 @@ public class FavoritesService
             .Select(f => f.Track!)
             .ToListAsync();
     }
+    public async Task<HashSet<Guid>> GetLikedTrackIdsAsync(
+        Guid userId, CancellationToken token = default)
+    {
+        var ids = await _context.FavoriteTracks
+            .Where(f => f.UserId == userId)
+            .Select(f => f.TrackId)
+            .ToListAsync(token);
+    
+        return ids.ToHashSet();
+    }
 }

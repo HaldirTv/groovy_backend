@@ -17,11 +17,12 @@ public class TracksController : ControllerBase
 {
     private readonly MusicService _musicService;
     private readonly ILogger<TracksController> _logger;
-
-    public TracksController(MusicService musicService, ILogger<TracksController> logger)
+    private readonly FavoritesService _favoritesService;
+    public TracksController(MusicService musicService, ILogger<TracksController> logger,FavoritesService favoritesService)
     {
         _musicService = musicService;
         _logger = logger;
+        _favoritesService = favoritesService;
     }
 
     [HttpGet]
@@ -33,22 +34,28 @@ public class TracksController : ControllerBase
         [FromQuery] int pageSize = 10,
         CancellationToken cancellationToken = default)
     {
-        // Защита от дурака: не даем передать отрицательные или нулевые значения
         if (pageNumber < 1) pageNumber = 1;
         if (pageSize < 1) pageSize = 10;
-        if (pageSize > 100) pageSize = 100; // Ограничиваем максимум, чтобы базу не положили
+        if (pageSize > 100) pageSize = 100;
 
-        // Получаем порцию данных и общее количество из сервиса
-        var (tracks, totalCount) = await _musicService.GetAllTracksAsync(search, userId, pageNumber, pageSize, cancellationToken);
-        
+        var (tracks, totalCount) = await _musicService.GetAllTracksAsync(
+            search, userId, pageNumber, pageSize, cancellationToken);
+
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
-        // Маппим треки в DTO
-        var trackDtos = tracks.Select(t => MapToDto(t, baseUrl)).ToList();
 
-        // Заворачиваем в красивый постраничный ответ
+        HttpContext.TryGetUserId(out var currentUserId);
+
+
+        var likedIds = currentUserId != Guid.Empty
+            ? await _favoritesService.GetLikedTrackIdsAsync(currentUserId, cancellationToken)
+            : new HashSet<Guid>();
+
+        var trackDtos = tracks
+            .Select(t => MapToDto(t, baseUrl, likedIds.Contains(t.Id)))
+            .ToList();
+
         var result = new PagedResultDto<TrackDto>(trackDtos, totalCount, pageNumber, pageSize);
-
         return Ok(result);
     }
 
@@ -267,25 +274,15 @@ public async Task<IActionResult> RenameTrack(
 
     // ─── helpers ────────────────────────────────────────────────────────
 
-    private static TrackDto MapToDto(Track track, string baseUrl)
+    private static TrackDto MapToDto(Track track, string baseUrl, bool isLiked = false)
     {
-        // Ссылка на стриминг всегда ведет на наш эндпоинт, 
-        // потому что наш эндпоинт умеет делать редирект на Jamendo + крутить счетчик прослушиваний!
         var audioUrl = $"{baseUrl}/music/tracks/{track.Id}/stream";
 
         string? coverUrl = null;
-
-        // ИСПРАВЛЕНИЕ: Если трек внешний — берем готовую ссылку на обложку Jamendo
         if (track.IsExternal)
-        {
             coverUrl = track.ExternalCoverUrl;
-        }
-        // Если локальный — строим путь к нашему хранилищу файлов
-        else if (track.CoverImageRelativePath is not null)
-        {
-            var coverExt = Path.GetExtension(track.CoverImageRelativePath);
-            coverUrl = $"{baseUrl}/music/files/covers/{track.Id}_cover{coverExt}";
-        }
+        else if (!string.IsNullOrWhiteSpace(track.CoverImageRelativePath))
+            coverUrl = $"{baseUrl}/music/files/{track.CoverImageRelativePath.Replace('\\', '/')}";
 
         return new TrackDto
         {
@@ -297,10 +294,11 @@ public async Task<IActionResult> RenameTrack(
             DurationSeconds = track.DurationSeconds,
             FileSizeBytes   = track.FileSizeBytes,
             ContentType     = track.ContentType,
-            AudioUrl        = audioUrl,       // Сюда пойдет ссылка на твой /stream (он редиректнет куда надо)
-            CoverImageUrl   = coverUrl,       // А сюда сразу пойдет готовая ссылка на картинку Jamendo
+            AudioUrl        = audioUrl,
+            CoverImageUrl   = coverUrl,
             UploadedAt      = track.UploadedAt,
             PlayCount       = track.PlayCount,
+            IsLiked         = isLiked
         };
     }
 }

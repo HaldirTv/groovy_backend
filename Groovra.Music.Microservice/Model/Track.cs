@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Groovra.Music.Microservice.Model;
 
@@ -54,4 +55,19 @@ public class Track
     public Guid UserId { get; set; } // Для треков Jamendo можно зашить Guid системного администратора/бота
 
     public long PlayCount { get; set; } = 0;
+    
+    [NotMapped]
+    public string? CoverImageUrl
+    {
+        get
+        {
+            if (IsExternal) 
+                return ExternalCoverUrl;
+
+            if (!string.IsNullOrWhiteSpace(CoverImageRelativePath))
+                return $"/music/files/{CoverImageRelativePath.Replace('\\', '/')}";
+
+            return null;
+        }
+    }
 }
