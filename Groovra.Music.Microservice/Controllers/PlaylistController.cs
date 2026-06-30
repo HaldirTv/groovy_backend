@@ -28,7 +28,7 @@ public class PlaylistsController : ControllerBase
             return Unauthorized(new { message = "Потрібна авторизація." });
 
         var result = await _playlistService.CreatePlaylistAsync(
-            userId, dto.Title, dto.Description, dto.IsPrivate, cancellationToken);
+            userId, dto.Title, dto.Description, GetBaseUrl(),dto.IsPrivate, cancellationToken);
 
         if (!result.Success)
             return BadRequest(new { message = result.ErrorMessage });
@@ -72,7 +72,7 @@ public class PlaylistsController : ControllerBase
         if (playlist.IsPrivate && playlist.UserId != requesterId && !HttpContext.UserIsInRole(AppRoles.Admin))
             return NotFound(new { message = "Плейлист не знайдено." }); // Скрываем под 404, а не 403, чтобы не выдавать существование
 
-        var result = await _playlistService.GetPlaylistByIdAsync(id, cancellationToken);
+        var result = await _playlistService.GetPlaylistByIdAsync(id, GetBaseUrl(), cancellationToken);
 
         if (!result.Success)
             return NotFound(new { message = result.ErrorMessage });
@@ -214,6 +214,6 @@ public class PlaylistsController : ControllerBase
 
     private bool TryGetUserId(out Guid userId) =>
         HttpContext.TryGetUserId(out userId);
-
+    private string GetBaseUrl() => $"{Request.Scheme}://{Request.Host}";
 
 }

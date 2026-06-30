@@ -37,6 +37,7 @@ public class PlaylistService
         Guid userId,
         string title,
         string? description,
+        string baseUrl,
         bool isPrivate,
         CancellationToken cancellationToken = default)
     {
@@ -72,7 +73,7 @@ public class PlaylistService
         await _context.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Playlist created. Id={Id}, Slug={Slug}", playlist.Id, playlist.Slug);
-        return ServiceResult<PlaylistDto>.Ok(MapToDto(playlist));
+        return ServiceResult<PlaylistDto>.Ok(MapToDto(playlist, baseUrl)); 
     }
 
     // ─── GetUserPlaylists ─────────────────────────────────────────────────────
@@ -119,8 +120,9 @@ public class PlaylistService
     // ─── GetById ──────────────────────────────────────────────────────────────
 
     public async Task<ServiceResult<PlaylistDto>> GetPlaylistByIdAsync(
-        Guid playlistId,
-        CancellationToken cancellationToken = default)
+    Guid playlistId,
+    string baseUrl,              // ← додали
+    CancellationToken cancellationToken = default)
     {
         var playlist = await _context.Playlists
             .Include(p => p.Tracks.OrderBy(pt => pt.Position))
@@ -130,7 +132,7 @@ public class PlaylistService
         if (playlist is null)
             return ServiceResult<PlaylistDto>.Fail("Плейлист не знайдено.");
 
-        return ServiceResult<PlaylistDto>.Ok(MapToDto(playlist));
+        return ServiceResult<PlaylistDto>.Ok(MapToDto(playlist, baseUrl));
     }
 
     // ─── UpdatePrivacy ────────────────────────────────────────────────────────
@@ -280,7 +282,7 @@ public class PlaylistService
 
     // ─── helpers ──────────────────────────────────────────────────────────────
 
-    private static PlaylistDto MapToDto(Playlist p)
+    private static PlaylistDto MapToDto(Playlist p, string baseUrl = "")
     {
         return new PlaylistDto(
             p.Id,
@@ -290,7 +292,7 @@ public class PlaylistService
             p.Slug,
             p.CoverImageUrl,
             p.TrackCount,
-            (double)p.TotalDurationSeconds, 
+            (double)p.TotalDurationSeconds,
             p.IsPrivate,
             p.CreatedAt,
             p.Tracks?.Select(pt => new PlaylistTrackDto(
@@ -298,7 +300,11 @@ public class PlaylistService
                 pt.Track?.Title ?? "Unknown",
                 pt.Track?.ArtistName ?? "Unknown",
                 pt.Position,
-                pt.Track?.IsExternal == true ? pt.Track.ExternalCoverUrl : pt.Track?.CoverImageRelativePath,
+                pt.Track?.IsExternal == true
+                    ? pt.Track.ExternalCoverUrl
+                    : pt.Track?.CoverImageRelativePath != null
+                        ? $"{baseUrl}/music/files/{pt.Track.CoverImageRelativePath.Replace('\\', '/')}"
+                        : null,
                 pt.Track?.DurationSeconds ?? 0
             )).ToList() ?? new List<PlaylistTrackDto>()
         );
