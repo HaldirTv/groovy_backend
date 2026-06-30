@@ -92,34 +92,47 @@ public class UploadService
     /// <exception cref="ArgumentException">Thrown for invalid file type or size.</exception>
     public async Task<Track> UploadTrackAsync(
         UploadTrackRequestDto dto,
-        Guid ownerUserId,   // <--- 1. ДОБАВИЛИ ID ЮЗЕРА
-        string artistName,  // <--- 2. ДОБАВИЛИ ИМЯ АРТИСТА
+        Guid ownerUserId,   
+        string artistName,  
         CancellationToken cancellationToken = default)
     {
-        // ── 1. Validate the audio file ────────────────────────────────────
+        // ── 1. Валідація аудіофайлу ────────────────────────────────────────
         ValidateAudioFile(dto.File);
 
-        // ── 2. Optionally validate the cover image ────────────────────────
+        // ── 2. Валідація обкладинки (якщо є) ───────────────────────────────
         if (dto.CoverImage is not null)
         {
             ValidateCoverImage(dto.CoverImage);
         }
 
-        // ── 3. Build a unique, collision-free storage path ────────────────
+        // ── 3. Генерація унікального шляху збереження треку ─────────────────
         var trackId = Guid.NewGuid();
         var audioExt = Path.GetExtension(dto.File.FileName).ToLowerInvariant();
         var audioFileName = $"{trackId}{audioExt}";
         var audioRelativePath = Path.Combine("audio", audioFileName);
         var audioAbsolutePath = Path.Combine(_mediaBasePath, audioRelativePath);
 
-        // ── 4. Save the audio file atomically (temp → rename) ─────────────
+        // ── 4. Атомарне збереження аудіофайлу ──────────────────────────────
         await SaveFileAtomicAsync(dto.File, audioAbsolutePath, cancellationToken);
 
-        _logger.LogInformation(
-            "Audio file saved. TrackId={TrackId}, File={FileName}, Size={Size} bytes",
-            trackId, dto.File.FileName, dto.File.Length);
+        // ── 4.5. Читання тривалості аудіо за допомогою TagLib# ──────────────
+        int durationSeconds = 0;
+        try
+        {
+            using var tagFile = TagLib.File.Create(audioAbsolutePath);
+            durationSeconds = (int)tagFile.Properties.Duration.TotalSeconds;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Could not read audio duration for {File}: {Error}", 
+                dto.File.FileName, ex.Message);
+        }
 
-        // ── 5. Save the cover image (if provided) ─────────────────────────
+        _logger.LogInformation(
+            "Audio file saved. TrackId={TrackId}, File={FileName}, Size={Size} bytes, Duration={Duration}s",
+            trackId, dto.File.FileName, dto.File.Length, durationSeconds);
+
+        // ── 5. Збереження обкладинки (якщо є) ───────────────────────────────
         string? coverRelativePath = null;
         if (dto.CoverImage is not null)
         {
@@ -135,16 +148,16 @@ public class UploadService
                 trackId, dto.CoverImage.FileName);
         }
 
-        // ── 6. Build the domain model ─────────────────────────────────────
+        // ── 6. Створення доменної моделі треку ──────────────────────────────
         var track = new Track
         {
             Id = trackId,
-            UserId = ownerUserId,             // <--- 3. ПРИВЯЗЫВАЕМ ТРЕК К ВЛАДЕЛЬЦУ (ЮЗЕРУ)!
+            UserId = ownerUserId,             
             Title = dto.Title.Trim(),
-            ArtistName = artistName.Trim(),   // <--- 4. ИСПОЛЬЗУЕМ ИМЯ ИЗ ПАРАМЕТРА (а не dto.ArtistName)
+            ArtistName = artistName.Trim(),   
             Album = string.IsNullOrWhiteSpace(dto.Album) ? null : dto.Album.Trim(),
             Genre = string.IsNullOrWhiteSpace(dto.Genre) ? null : dto.Genre.Trim(),
-            DurationSeconds = 0, // Placeholder: populate with TagLib# or similar later
+            DurationSeconds = durationSeconds, // <--- Використовуємо реальну тривалість
             FileSizeBytes = dto.File.Length,
             ContentType = dto.File.ContentType,
             AudioRelativePath = audioRelativePath,
@@ -152,12 +165,12 @@ public class UploadService
             UploadedAt = DateTime.UtcNow,
         };
 
-        // ── 7. Persist to database (schema [music]) ───────────────────────
+        // ── 7. Збереження в базу даних ──────────────────────────────────────
         _db.Tracks.Add(track);
         await _db.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Трек сохранён в БД. Id={TrackId}, Title={Title}, OwnerId={OwnerId}",
+            "Трек збережено в БД. Id={TrackId}, Title={Title}, OwnerId={OwnerId}",
             track.Id, track.Title, track.UserId);
 
         return track;
@@ -179,10 +192,7 @@ public class UploadService
                 nameof(file));
 
         if (!AllowedAudioMimeTypes.Contains(file.ContentType))
-            throw new ArgumentException(
-                $"Unsupported audio format '{file.ContentType}'. " +
-                $"Allowed: {string.Join(", ", AllowedAudioMimeTypes)}.",
-                nameof(file));
+            throw new ArgumentException($"Unsupported audio format '{file.ContentType}'.", nameof(file));
     }
 
     /// <summary>
@@ -199,10 +209,7 @@ public class UploadService
                 nameof(file));
 
         if (!AllowedImageMimeTypes.Contains(file.ContentType))
-            throw new ArgumentException(
-                $"Unsupported image format '{file.ContentType}'. " +
-                $"Allowed: {string.Join(", ", AllowedImageMimeTypes)}.",
-                nameof(file));
+            throw new ArgumentException($"Unsupported image format '{file.ContentType}'.", nameof(file));
     }
 
     /// <summary>

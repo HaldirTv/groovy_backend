@@ -25,12 +25,18 @@
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
     <PackageReference Include="Scalar.AspNetCore" Version="2.14.14" />
+    <PackageReference Include="TagLibSharp" Version="2.3.0" />
   </ItemGroup>
   <ItemGroup>
     <Protobuf Include="..\Protos\username.proto" GrpcServices="Client" Link="Protos\username.proto" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Groovra.Shared\Groovra.Shared.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="MediaStorage\audio\" />
+    <Folder Include="MediaStorage\covers\" />
+    <Folder Include="Migrations\" />
   </ItemGroup>
 
 </Project>

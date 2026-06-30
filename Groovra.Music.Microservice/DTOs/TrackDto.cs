@@ -40,4 +40,5 @@ public class TrackDto
 
     /// <summary>Количество прослушиваний.</summary>
     public long PlayCount { get; set; }
+    public bool IsLiked { get; set; }
 }

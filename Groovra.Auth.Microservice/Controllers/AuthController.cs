@@ -278,6 +278,16 @@ public class AuthController : ControllerBase
         await _reglogService.RevokeAllSessionsAsync(user.Email, cancellationToken);
         return Ok(new { Message = "Password reset successfully!" }); 
     }
+    
+    [HttpGet("checkusername")]
+    public async Task<IActionResult> CheckUsername([FromQuery] string username, CancellationToken ctoken = default)
+    {
+        if (string.IsNullOrWhiteSpace(username) || username.Length < 3 || username.Length > 30)
+            return BadRequest(new { available = false, message = "Invalid username format." });
 
+        // Такая же проверка как в RegisterUnVerifiedAsync
+        bool available = await _reglogService.IsUsernameAvailableAsync(username, ctoken);
+        return Ok(new { available });
+    }
     
 }

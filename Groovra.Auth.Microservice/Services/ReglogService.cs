@@ -194,16 +194,46 @@ public class ReglogService
     }
     private async Task<string> GenerateUniqueUsernameAsync(string baseName, CancellationToken token)
     {
-        
-        string clean = new string(baseName.Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
+        // Транслітерація кирилиці в латиницю
+        var translitMap = new Dictionary<char, string>
+        {
+            {'а',"a"},{'б',"b"},{'в',"v"},{'г',"g"},{'д',"d"},{'е',"e"},{'ё',"yo"},
+            {'ж',"zh"},{'з',"z"},{'и',"i"},{'й',"y"},{'к',"k"},{'л',"l"},{'м',"m"},
+            {'н',"n"},{'о',"o"},{'п',"p"},{'р',"r"},{'с',"s"},{'т',"t"},{'у',"u"},
+            {'ф',"f"},{'х',"kh"},{'ц',"ts"},{'ч',"ch"},{'ш',"sh"},{'щ',"shch"},
+            {'ъ',""},{'ы',"y"},{'ь',""},{'э',"e"},{'ю',"yu"},{'я',"ya"},
+            // Українські
+            {'і',"i"},{'ї',"yi"},{'є',"ye"},{'ґ',"g"},
+        };
+
+        // 1. Транслітеруємо
+        var transliterated = new System.Text.StringBuilder();
+        foreach (char c in baseName.ToLowerInvariant())
+        {
+            if (translitMap.TryGetValue(c, out string? mapped))
+                transliterated.Append(mapped);
+            else
+                transliterated.Append(c);
+        }
+
+        // 2. Залишаємо тільки a-z, 0-9, підкреслення
+        string clean = new string(
+            transliterated.ToString()
+                .Where(c => (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')
+                .ToArray()
+        );
+
+        // 3. Якщо після очищення нічого не залишилось — fallback
         clean = clean.Length > 40 ? clean[..40] : clean;
         if (string.IsNullOrEmpty(clean)) clean = "user";
 
-       
+        // 4. Перебираємо кандидатів без рандому — user, user1, user2...
         string candidate = clean;
+        int counter = 1;
         while (await _context.Users.AnyAsync(u => u.Username == candidate, token))
         {
-            candidate = $"{clean}_{Random.Shared.Next(1000, 9999)}";
+            candidate = $"{clean}{counter}";
+            counter++;
         }
 
         return candidate;
@@ -234,6 +264,11 @@ public class ReglogService
    
     
     //--------------------------------
+    public async Task<bool> IsUsernameAvailableAsync(string username, CancellationToken token = default)
+    {
+        return !await _context.Users.AnyAsync(u => u.Username == username, token);
+    }
+    
     
     public async Task<ServiceResult<string>> RequestPasswordResetAsync(User user, CancellationToken cancellationToken)
     {

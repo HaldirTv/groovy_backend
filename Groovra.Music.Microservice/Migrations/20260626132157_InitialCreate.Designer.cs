@@ -4,6 +4,7 @@ using Groovra.Music.Microservice.Model;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Groovra.Music.Microservice.Migrations
 {
     [DbContext(typeof(MusicDbContext))]
-    partial class MusicDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260626132157_InitialCreate")]
+    partial class InitialCreate
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -48,85 +51,6 @@ namespace Groovra.Music.Microservice.Migrations
                         .IsUnique();
 
                     b.ToTable("FavoriteTracks", "music");
-                });
-
-            modelBuilder.Entity("Groovra.Music.Microservice.Model.Playlist", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("CoverImageUrl")
-                        .HasMaxLength(1024)
-                        .HasColumnType("nvarchar(1024)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsPrivate")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Slug")
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("TotalDurationSeconds")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(0);
-
-                    b.Property<int>("TrackCount")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(0);
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Slug")
-                        .IsUnique()
-                        .HasFilter("[Slug] IS NOT NULL");
-
-                    b.ToTable("Playlists", "music");
-                });
-
-            modelBuilder.Entity("Groovra.Music.Microservice.Model.PlaylistTrack", b =>
-                {
-                    b.Property<Guid>("PlaylistId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("TrackId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("AddedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("Position")
-                        .HasColumnType("int");
-
-                    b.HasKey("PlaylistId", "TrackId");
-
-                    b.HasIndex("TrackId");
-
-                    b.ToTable("PlaylistTracks", "music");
                 });
 
             modelBuilder.Entity("Groovra.Music.Microservice.Model.Track", b =>
@@ -210,30 +134,6 @@ namespace Groovra.Music.Microservice.Migrations
                         .IsRequired();
 
                     b.Navigation("Track");
-                });
-
-            modelBuilder.Entity("Groovra.Music.Microservice.Model.PlaylistTrack", b =>
-                {
-                    b.HasOne("Groovra.Music.Microservice.Model.Playlist", "Playlist")
-                        .WithMany("Tracks")
-                        .HasForeignKey("PlaylistId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Groovra.Music.Microservice.Model.Track", "Track")
-                        .WithMany()
-                        .HasForeignKey("TrackId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Playlist");
-
-                    b.Navigation("Track");
-                });
-
-            modelBuilder.Entity("Groovra.Music.Microservice.Model.Playlist", b =>
-                {
-                    b.Navigation("Tracks");
                 });
 #pragma warning restore 612, 618
         }

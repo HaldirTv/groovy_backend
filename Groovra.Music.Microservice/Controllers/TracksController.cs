@@ -1,6 +1,7 @@
 using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Model;
 using Groovra.Music.Microservice.Services;
+using Groovra.Shared.Extensions;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Groovra.Music.Microservice.Controllers;
@@ -16,23 +17,45 @@ public class TracksController : ControllerBase
 {
     private readonly MusicService _musicService;
     private readonly ILogger<TracksController> _logger;
-
-    public TracksController(MusicService musicService, ILogger<TracksController> logger)
+    private readonly FavoritesService _favoritesService;
+    public TracksController(MusicService musicService, ILogger<TracksController> logger,FavoritesService favoritesService)
     {
         _musicService = musicService;
         _logger = logger;
+        _favoritesService = favoritesService;
     }
 
     [HttpGet]
-    [ProducesResponseType(typeof(IReadOnlyList<TrackDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAllTracks([FromQuery] string? search,[FromQuery] Guid? userId, CancellationToken cancellationToken)
+    [ProducesResponseType(typeof(PagedResultDto<TrackDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAllTracks(
+        [FromQuery] string? search,
+        [FromQuery] Guid? userId,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 10,
+        CancellationToken cancellationToken = default)
     {
-        // Передаем строку поиска в сервис
-        var tracks = await _musicService.GetAllTracksAsync(search,userId,cancellationToken);
+        if (pageNumber < 1) pageNumber = 1;
+        if (pageSize < 1) pageSize = 10;
+        if (pageSize > 100) pageSize = 100;
+
+        var (tracks, totalCount) = await _musicService.GetAllTracksAsync(
+            search, userId, pageNumber, pageSize, cancellationToken);
+
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
-        var result = tracks.Select(t => MapToDto(t, baseUrl)).ToList();
 
+        HttpContext.TryGetUserId(out var currentUserId);
+
+
+        var likedIds = currentUserId != Guid.Empty
+            ? await _favoritesService.GetLikedTrackIdsAsync(currentUserId, cancellationToken)
+            : new HashSet<Guid>();
+
+        var trackDtos = tracks
+            .Select(t => MapToDto(t, baseUrl, likedIds.Contains(t.Id)))
+            .ToList();
+
+        var result = new PagedResultDto<TrackDto>(trackDtos, totalCount, pageNumber, pageSize);
         return Ok(result);
     }
 
@@ -94,43 +117,40 @@ public class TracksController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status416RangeNotSatisfiable)]
-    public async Task<IActionResult> StreamTrack(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> StreamTrack(Guid id, CancellationToken cancellationToken = default)
     {
-        // ─── Проверка авторизации через заголовки шлюза ─────────────────────────
-        var userIdString = Request.Headers["X-User-Id"].ToString();
-        var userRole     = Request.Headers["X-User-Role"].ToString();
+        // 1. Проверка авторизации шлюза (оставляем твой код)
+        
+        if (!HttpContext.TryGetUserId(out _))
+            return Unauthorized(new { Error = "Streaming requires authentication." });
 
-        if (!Guid.TryParse(userIdString, out _))
-            return Unauthorized(new { Error = "Streaming requires authentication. Missing or invalid X-User-Id header." });
+        // 2. Достаем трек из базы, чтобы проверить, локальный он или внешний
+        var track = await _musicService.GetTrackByIdAsync(id, cancellationToken);
+        if (track is null)
+            return NotFound(new { Error = "Трек не найден." });
 
-        // ─── Получение информации о файле ────────────────────────────────────
-        var fileInfo = await _musicService.GetTrackFileInfoAsync(id, cancellationToken);
-
-        if (fileInfo is null)
-            return NotFound(new { Error = $"Трек с id '{id}' не найден." });
-
-        var (absolutePath, contentType) = fileInfo.Value;
-
-        if (!System.IO.File.Exists(absolutePath))
+        // ─── ФИШКА: Если трек из Jamendo ────────────────────────────────────────
+        if (track.IsExternal)
         {
-            _logger.LogWarning("Stream: файл не найден на диске для трека {TrackId}: {Path}", id, absolutePath);
-            return NotFound(new { Error = $"Аудиофайл трека '{id}' отсутствует на сервере." });
+            // Атомарно увеличиваем счетчик прослушиваний в нашей БД (fire-and-forget)!
+            await _musicService.IncrementPlayCountAsync(id, CancellationToken.None);
+
+            _logger.LogInformation("Stream (External): редирект трека {TrackId} на Jamendo URL.", id);
+
+            // Перенаправляем браузер/плеер фронтенда качать трек напрямую с серверов Jamendo
+            return Redirect(track.ExternalAudioUrl!);
         }
 
-        // ─── Инкремент PlayCount (fire-and-forget, не блокирует отдачу) ────────
-        _ = _musicService.IncrementPlayCountAsync(id, CancellationToken.None);
+        // ─── Логика для локальных файлов (твой старый рабочий код) ───────────────
+        var fileInfo = await _musicService.GetTrackFileInfoAsync(id, cancellationToken);
+        if (fileInfo is null) return NotFound();
 
-        _logger.LogInformation(
-            "Stream: трек {TrackId} запрошен пользователем {UserId} (роль: {UserRole}).",
-            id, userIdString, userRole);
+        var (absolutePath, contentType) = fileInfo.Value;
+        if (!System.IO.File.Exists(absolutePath)) return NotFound();
 
-        // ─── Заголовки кэширования ───────────────────────────────────────────
-        // Аудиофайлы идентифицируются неизменяемым GUID → можно кэшировать на год.
-        // «immutable» сообщает браузеру не отправлять If-Modified-Since при перезагрузке.
+        await _musicService.IncrementPlayCountAsync(id, CancellationToken.None);
         Response.Headers.CacheControl = "public, max-age=31536000, immutable";
 
-        // enableRangeProcessing: true включает поддержку 206 Partial Content
-        // и позволяет плеерам перематывать/прокручивать аудио без полной загрузки.
         return PhysicalFile(absolutePath, contentType, enableRangeProcessing: true);
     }
 
@@ -150,10 +170,10 @@ public class TracksController : ControllerBase
     public async Task<IActionResult> DeleteTrack(Guid id, CancellationToken cancellationToken)
     {
 
-        var userIdString = Request.Headers["X-User-Id"].ToString();
+
         var userRole = Request.Headers["X-User-Role"].ToString();
 
-        if (!Guid.TryParse(userIdString, out Guid currentUserId))
+        if (!HttpContext.TryGetUserId(out var currentUserId))
             return Unauthorized(new { Error = "Invalid or missing user identity." });
 
         try
@@ -212,10 +232,10 @@ public async Task<IActionResult> RenameTrack(
         return BadRequest(new { Error = "New title cannot be empty." });
 
     // 2. Достаем данные юзера, которые шлюз (Gateway) бережно вытащил из JWT
-    var userIdString = Request.Headers["X-User-Id"].ToString();
+
     var userRole = Request.Headers["X-User-Role"].ToString();
 
-    if (!Guid.TryParse(userIdString, out Guid currentUserId))
+    if (!HttpContext.TryGetUserId(out var currentUserId))
     {
         return Unauthorized(new { Error = "User identity is missing or invalid." });
     }
@@ -254,17 +274,15 @@ public async Task<IActionResult> RenameTrack(
 
     // ─── helpers ────────────────────────────────────────────────────────
 
-    private static TrackDto MapToDto(Track track, string baseUrl)
+    private static TrackDto MapToDto(Track track, string baseUrl, bool isLiked = false)
     {
-        // AudioUrl теперь указывает на streaming endpoint с поддержкой HTTP Range
         var audioUrl = $"{baseUrl}/music/tracks/{track.Id}/stream";
 
         string? coverUrl = null;
-        if (track.CoverImageRelativePath is not null)
-        {
-            var coverExt = Path.GetExtension(track.CoverImageRelativePath);
-            coverUrl = $"{baseUrl}/music/files/covers/{track.Id}_cover{coverExt}";
-        }
+        if (track.IsExternal)
+            coverUrl = track.ExternalCoverUrl;
+        else if (!string.IsNullOrWhiteSpace(track.CoverImageRelativePath))
+            coverUrl = $"{baseUrl}/music/files/{track.CoverImageRelativePath.Replace('\\', '/')}";
 
         return new TrackDto
         {
@@ -280,6 +298,7 @@ public async Task<IActionResult> RenameTrack(
             CoverImageUrl   = coverUrl,
             UploadedAt      = track.UploadedAt,
             PlayCount       = track.PlayCount,
+            IsLiked         = isLiked
         };
     }
 }

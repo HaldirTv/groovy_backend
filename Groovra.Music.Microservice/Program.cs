@@ -28,10 +28,13 @@ builder.Services.AddOpenApi(options =>
 builder.Services.AddDbContext<MusicDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+builder.Services.AddHttpClient();
+
 // Register services (scoped per-request)
 builder.Services.AddScoped<UploadService>();
 builder.Services.AddScoped<MusicService>();
-
+builder.Services.AddScoped<FavoritesService>();
+builder.Services.AddScoped<PlaylistService>();
 builder.Services.AddGrpcClient<UserNameGrpcService.UserNameGrpcServiceClient>(o =>
 {
     // Возьми этот URL из appsettings.json, либо захардкодь для локальной разработки
@@ -57,11 +60,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseAuthorization();
-app.MapControllers();
 
-// Serve stored media files as static content (for local dev).
-// In production, replace with a CDN or dedicated file-serving middleware.
+// ── Настройка и раздача статических файлов (ПЕРЕНЕСЕНО НАВЕРХ) ──────────────────
 // Находим правильный абсолютный путь
 var basePathConfig = builder.Configuration["MediaStorage:BasePath"];
 string mediaPath = string.IsNullOrWhiteSpace(basePathConfig)
@@ -75,17 +75,19 @@ if (!Directory.Exists(mediaPath))
 }
 
 // Раздаём ТОЛЬКО обложки (covers/) как статику.
-// Аудиофайлы (audio/) намеренно НЕ включены: они отдаются через
-// streaming endpoint /music/tracks/{id}/stream с поддержкой HTTP Range.
 var coversPath = Path.Combine(mediaPath, "covers");
 if (!Directory.Exists(coversPath))
     Directory.CreateDirectory(coversPath);
 
+// Статика должна обрабатываться ДО авторизации и контроллеров, чтобы быть общедоступной
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(coversPath),
     RequestPath  = "/music/files/covers"
 });
+// ───────────────────────────────────────────────────────────────────────────────
 
+app.UseAuthorization();
+app.MapControllers();
 
 app.Run();
