@@ -1,15 +1,22 @@
+using Groovra.Messaging.Extensions;
+using Groovra.Music.Microservice.Grpc;
 using Groovra.Music.Microservice.Model;
 using Groovra.Music.Microservice.Services;
 using Groovra.Shared.Grpc;
 using Grpc.Net.Client;
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
+
+builder.Services.AddMessagingBus(builder.Configuration);
+
 builder.Services.AddOpenApi(options =>
 {
     options.AddDocumentTransformer((document, context, cancellationToken) =>
@@ -48,7 +55,19 @@ builder.Services.AddGrpcClient<UserNameGrpcService.UserNameGrpcServiceClient>(o 
         HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
     return handler;
 });
+builder.Services.AddGrpc();
 
+// === РЕГИСТРАЦИЯ REDIS ===
+var redisConnectionString = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
+
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp => 
+{
+    // ConfigurationOptions автоматически управляет переподключениями, если Redis моргнет
+    var options = ConfigurationOptions.Parse(redisConnectionString);
+    options.AbortOnConnectFail = false; // Не ронять микросервис, если Redis временно недоступен при старте
+    
+    return ConnectionMultiplexer.Connect(options);
+});
 
 // ── App ───────────────────────────────────────────────────────────────────────
 var app = builder.Build();
@@ -89,5 +108,6 @@ app.UseStaticFiles(new StaticFileOptions
 
 app.UseAuthorization();
 app.MapControllers();
+app.MapGrpcService<TrackInfoGrpcServer>();
 
 app.Run();

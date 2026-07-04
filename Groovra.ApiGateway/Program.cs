@@ -121,7 +121,8 @@ app.MapScalarApiReference("/scalar/v1", options =>
     // Мы говорим Scalar-у тянуть JSON по этому адресу,
     // а YARP перехватит этот запрос и отправит его в Auth-микросервис.
     options.AddDocument("auth", "Auth Service", "/docs/auth/openapi.json", isDefault: true)
-        .AddDocument("music","Music Service","docs/music/openapi.json");
+        .AddDocument("music", "Music Service", "docs/music/openapi.json")
+        .AddDocument("history", "History Service", "/docs/history/openapi.json");
 });
 
 // === 6. ЗАПУСК ШЛЮЗА YARP ===

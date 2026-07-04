@@ -2,6 +2,9 @@ using Groovra.Music.Microservice.Model;
 using Microsoft.EntityFrameworkCore;
 using Groovra.Shared.Extensions;
 using Groovra.Shared.Constants;
+using Groovra.Messaging.Contracts;
+using MassTransit;
+
 namespace Groovra.Music.Microservice.Services;
 
 /// <summary>
@@ -11,17 +14,19 @@ public class MusicService
 {
     private readonly MusicDbContext _db;
     private readonly ILogger<MusicService> _logger;
-
+    private readonly IPublishEndpoint _publishEndpoint;
     /// <summary>Абсолютный корневой путь хранилища медиафайлов.</summary>
     private readonly string _mediaBasePath;
 
     public MusicService(
         MusicDbContext db,
         IConfiguration configuration,
-        ILogger<MusicService> logger)
+        ILogger<MusicService> logger,
+        IPublishEndpoint publishEndpoint)
     {
         _db = db;
         _logger = logger;
+        _publishEndpoint = publishEndpoint;
 
         var configured = configuration["MediaStorage:BasePath"];
         _mediaBasePath = string.IsNullOrWhiteSpace(configured)
@@ -196,7 +201,7 @@ public class MusicService
     /// <param name="trackId">GUID трека.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
     /// <returns>True — счётчик обновлён; false — трек не найден.</returns>
-    public async Task<bool> IncrementPlayCountAsync(Guid trackId, CancellationToken cancellationToken = default)
+    public async Task<bool> IncrementPlayCountAsync(Guid userId,Guid trackId, CancellationToken cancellationToken = default)
     {
         var updated = await _db.Tracks
             .Where(t => t.Id == trackId)
@@ -209,7 +214,12 @@ public class MusicService
             _logger.LogWarning("IncrementPlayCount: трек {TrackId} не найден.", trackId);
             return false;
         }
-
+        await _publishEndpoint.Publish(new TrackPlayedEvent(
+            UserId: userId,
+            TrackId: trackId,
+            PlayedAt: DateTime.UtcNow
+        ), cancellationToken);
+        
         _logger.LogDebug("PlayCount увеличен для трека {TrackId}.", trackId);
         return true;
     }
