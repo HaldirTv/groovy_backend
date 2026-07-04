@@ -1,0 +1,36 @@
+﻿syntax = "proto3";
+
+option csharp_namespace = "Groovra.Shared.Grpc";
+
+package trackinfo;
+
+service TrackInfoGrpcService {
+  rpc GetTracksInfo (TrackInfoRequest) returns (TrackInfoResponse);
+}
+
+// Запрос от History
+message TrackInfoRequest {
+  repeated string trackIds = 1;
+  string currentUserId = 2; // Передаем ID юзера, чтобы Music проверил поле IsLiked!
+}
+
+// Ответ - это по сути твой TrackDto, переведенный на язык gRPC
+message TrackDetails {
+  string trackId = 1;
+  string title = 2;
+  string artistName = 3;
+  string album = 4;
+  string genre = 5;
+  double durationSeconds = 6;
+  int64 fileSizeBytes = 7;
+  string contentType = 8;
+  string audioUrl = 9;
+  string coverImageUrl = 10;
+  string uploadedAt = 11; // Даты в gRPC удобно гонять строками (ISO 8601)
+  int64 playCount = 12;
+  bool isLiked = 13;
+}
+
+message TrackInfoResponse {
+  repeated TrackDetails tracks = 1;
+}

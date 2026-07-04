@@ -121,7 +121,7 @@ public class TracksController : ControllerBase
     {
         // 1. Проверка авторизации шлюза (оставляем твой код)
         
-        if (!HttpContext.TryGetUserId(out _))
+        if (!HttpContext.TryGetUserId(out var userId))
             return Unauthorized(new { Error = "Streaming requires authentication." });
 
         // 2. Достаем трек из базы, чтобы проверить, локальный он или внешний
@@ -133,7 +133,7 @@ public class TracksController : ControllerBase
         if (track.IsExternal)
         {
             // Атомарно увеличиваем счетчик прослушиваний в нашей БД (fire-and-forget)!
-            await _musicService.IncrementPlayCountAsync(id, CancellationToken.None);
+            await _musicService.IncrementPlayCountAsync(userId,id, CancellationToken.None);
 
             _logger.LogInformation("Stream (External): редирект трека {TrackId} на Jamendo URL.", id);
 
@@ -148,7 +148,7 @@ public class TracksController : ControllerBase
         var (absolutePath, contentType) = fileInfo.Value;
         if (!System.IO.File.Exists(absolutePath)) return NotFound();
 
-        await _musicService.IncrementPlayCountAsync(id, CancellationToken.None);
+        await _musicService.IncrementPlayCountAsync(userId,id, CancellationToken.None);
         Response.Headers.CacheControl = "public, max-age=31536000, immutable";
 
         return PhysicalFile(absolutePath, contentType, enableRangeProcessing: true);
