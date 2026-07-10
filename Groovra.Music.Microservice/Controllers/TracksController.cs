@@ -277,19 +277,19 @@ public async Task<IActionResult> RenameTrack(
     private static TrackDto MapToDto(Track track, string baseUrl, bool isLiked = false)
     {
         var audioUrl = $"{baseUrl}/music/tracks/{track.Id}/stream";
-
+ 
         string? coverUrl = null;
         if (track.IsExternal)
             coverUrl = track.ExternalCoverUrl;
         else if (!string.IsNullOrWhiteSpace(track.CoverImageRelativePath))
             coverUrl = $"{baseUrl}/music/files/{track.CoverImageRelativePath.Replace('\\', '/')}";
-
+ 
         return new TrackDto
         {
             TrackId         = track.Id,
             Title           = track.Title,
             ArtistName      = track.ArtistName,
-            Album           = track.Album,
+            Album           = track.AlbumTitle ?? track.Album?.Title, // ← было: track.Album
             Genre           = track.Genre,
             DurationSeconds = track.DurationSeconds,
             FileSizeBytes   = track.FileSizeBytes,

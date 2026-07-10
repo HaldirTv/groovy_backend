@@ -1,4 +1,5 @@
 using Groovra.Messaging.Extensions;
+using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Grpc;
 using Groovra.Music.Microservice.Model;
 using Groovra.Music.Microservice.Services;
@@ -14,6 +15,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 // ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    options.ModelBinderProviders.Insert(0, new Groovra.Music.Microservice.Binders.GuidListModelBinderProvider());
+});
 
 builder.Services.AddMessagingBus(builder.Configuration);
 
@@ -42,6 +47,8 @@ builder.Services.AddScoped<UploadService>();
 builder.Services.AddScoped<MusicService>();
 builder.Services.AddScoped<FavoritesService>();
 builder.Services.AddScoped<PlaylistService>();
+builder.Services.AddScoped<AlbumService>();
+builder.Services.AddScoped<StatsService>();
 builder.Services.AddGrpcClient<UserNameGrpcService.UserNameGrpcServiceClient>(o =>
 {
     // Возьми этот URL из appsettings.json, либо захардкодь для локальной разработки

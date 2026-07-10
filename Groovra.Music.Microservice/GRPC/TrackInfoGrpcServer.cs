@@ -59,7 +59,7 @@ public class TrackInfoGrpcServer : TrackInfoGrpcService.TrackInfoGrpcServiceBase
                 TrackId = track.Id.ToString(),
                 Title = track.Title,
                 ArtistName = track.ArtistName,
-                Album = track.Album ?? "", // gRPC не любит null
+                Album = track.AlbumTitle ?? track.Album?.Title ?? "", 
                 Genre = track.Genre ?? "",
                 DurationSeconds = track.DurationSeconds,
                 FileSizeBytes = track.FileSizeBytes,

@@ -38,6 +38,7 @@
     <ProjectReference Include="..\Groovra.Shared\Groovra.Shared.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Folder Include="MediaStorage\albumcovers\" />
     <Folder Include="MediaStorage\audio\" />
     <Folder Include="MediaStorage\covers\" />
     <Folder Include="Migrations\" />

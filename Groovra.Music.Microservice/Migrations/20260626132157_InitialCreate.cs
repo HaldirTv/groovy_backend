@@ -11,36 +11,34 @@ namespace Groovra.Music.Microservice.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.EnsureSchema(
-                name: "music");
+            migrationBuilder.EnsureSchema(name: "music");
 
-            migrationBuilder.CreateTable(
-                name: "Tracks",
+            // 1. ВМЕСТО СОЗДАНИЯ ТАБЛИЦЫ TRACKS — ПРОСТО ДОБАВЛЯЕМ НОВЫЕ КОЛОНКИ:
+            migrationBuilder.AddColumn<bool>(
+                name: "IsExternal",
                 schema: "music",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Title = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    ArtistName = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    Album = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: true),
-                    Genre = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                    DurationSeconds = table.Column<double>(type: "float", nullable: false),
-                    FileSizeBytes = table.Column<long>(type: "bigint", nullable: false),
-                    ContentType = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    IsExternal = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
-                    ExternalAudioUrl = table.Column<string>(type: "nvarchar(1024)", maxLength: 1024, nullable: true),
-                    ExternalCoverUrl = table.Column<string>(type: "nvarchar(1024)", maxLength: 1024, nullable: true),
-                    AudioRelativePath = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    CoverImageRelativePath = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    UploadedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UserId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    PlayCount = table.Column<long>(type: "bigint", nullable: false, defaultValue: 0L)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Tracks", x => x.Id);
-                });
+                table: "Tracks",
+                type: "bit",
+                nullable: false,
+                defaultValue: false);
 
+            migrationBuilder.AddColumn<string>(
+                name: "ExternalAudioUrl",
+                schema: "music",
+                table: "Tracks",
+                type: "nvarchar(1024)",
+                maxLength: 1024,
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "ExternalCoverUrl",
+                schema: "music",
+                table: "Tracks",
+                type: "nvarchar(1024)",
+                maxLength: 1024,
+                nullable: true);
+
+            // 2. ОСТАВЛЯЕМ СОЗДАНИЕ НОВОЙ ТАБЛИЦЫ FavoriteTracks БЕЗ ИЗМЕНЕНИЙ:
             migrationBuilder.CreateTable(
                 name: "FavoriteTracks",
                 schema: "music",
@@ -77,7 +75,6 @@ namespace Groovra.Music.Microservice.Migrations
                 columns: new[] { "UserId", "TrackId" },
                 unique: true);
         }
-
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {

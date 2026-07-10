@@ -10,7 +10,9 @@ public class MusicDbContext : DbContext
     public DbSet<FavoriteTrack> FavoriteTracks { get; set; }
     public DbSet<Playlist> Playlists { get; set; }
     public DbSet<PlaylistTrack> PlaylistTracks { get; set; }
-
+    
+    public DbSet<Album> Albums { get; set; }
+    public DbSet<FavoriteAlbum> FavoriteAlbums { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -21,7 +23,7 @@ public class MusicDbContext : DbContext
             entity.HasKey(t => t.Id);
             entity.Property(t => t.Title).IsRequired().HasMaxLength(256);
             entity.Property(t => t.ArtistName).IsRequired().HasMaxLength(256);
-            entity.Property(t => t.Album).HasMaxLength(256);
+            entity.Property(t => t.AlbumTitle).HasMaxLength(256);
             entity.Property(t => t.Genre).HasMaxLength(128);
             entity.Property(t => t.ContentType).HasMaxLength(128);
             
@@ -75,6 +77,28 @@ public class MusicDbContext : DbContext
                   .WithMany()
                   .HasForeignKey(f => f.TrackId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+        
+        
+        modelBuilder.Entity<Album>(b =>
+        {
+            b.HasIndex(a => a.UserId);
+            b.HasQueryFilter(a => !a.IsDeleted); // как у Playlist — скрываем soft-deleted по умолчанию
+        });
+
+        modelBuilder.Entity<Track>()
+            .HasOne(t => t.Album)
+            .WithMany(a => a.Tracks)
+            .HasForeignKey(t => t.AlbumId)
+            .OnDelete(DeleteBehavior.SetNull); // удаление альбома не должно валить треки
+
+        modelBuilder.Entity<FavoriteAlbum>(b =>
+        {
+            b.HasKey(fa => new { fa.UserId, fa.AlbumId });
+            b.HasOne(fa => fa.Album)
+                .WithMany()
+                .HasForeignKey(fa => fa.AlbumId)
+                .OnDelete(DeleteBehavior.Cascade); // лайк удаляется вместе с альбомом
         });
     }
 }

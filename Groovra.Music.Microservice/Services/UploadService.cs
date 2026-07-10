@@ -1,5 +1,6 @@
 using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Model;
+using Microsoft.EntityFrameworkCore;
 
 namespace Groovra.Music.Microservice.Services;
 
@@ -155,7 +156,7 @@ public class UploadService
             UserId = ownerUserId,             
             Title = dto.Title.Trim(),
             ArtistName = artistName.Trim(),   
-            Album = string.IsNullOrWhiteSpace(dto.Album) ? null : dto.Album.Trim(),
+            AlbumTitle = string.IsNullOrWhiteSpace(dto.Album) ? null : dto.Album.Trim(),
             Genre = string.IsNullOrWhiteSpace(dto.Genre) ? null : dto.Genre.Trim(),
             DurationSeconds = durationSeconds, // <--- Використовуємо реальну тривалість
             FileSizeBytes = dto.File.Length,
@@ -173,9 +174,86 @@ public class UploadService
             "Трек збережено в БД. Id={TrackId}, Title={Title}, OwnerId={OwnerId}",
             track.Id, track.Title, track.UserId);
 
+        // If an album title was provided with the upload, attach the track to an existing album
+        // or create a new album for this user. This mirrors common services behaviour where
+        // providing an album name groups tracks automatically.
+        if (!string.IsNullOrWhiteSpace(track.AlbumTitle))
+        {
+            var albumTitle = track.AlbumTitle!.Trim();
+            var album = await _db.Albums
+                .FirstOrDefaultAsync(a => a.UserId == ownerUserId && a.Title == albumTitle && !a.IsDeleted, cancellationToken);
+
+            if (album is null)
+            {
+                album = new Album
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = ownerUserId,
+                    Title = albumTitle,
+                    ArtistName = artistName,
+                    Description = null,
+                    ReleaseDate = null,
+                    TrackCount = 1,
+                    TotalDurationSeconds = track.DurationSeconds,
+                    IsDeleted = false,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                };
+
+                _db.Albums.Add(album);
+                _logger.LogInformation("Created album '{Title}' (Id={Id}) for user {UserId}", albumTitle, album.Id, ownerUserId);
+            }
+            else
+            {
+                album.TrackCount++;
+                album.TotalDurationSeconds += track.DurationSeconds;
+                album.UpdatedAt = DateTime.UtcNow;
+            }
+
+            // Link the track to the album and save changes
+            track.AlbumId = album.Id;
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
         return track;
     }
+    
+    
+    /// <summary>
+    /// Проверяет и атомарно сохраняет обложку альбома в папку MediaStorage/albumcovers
+    /// </summary>
+    public async Task<string> UploadAlbumCoverAsync(IFormFile file, Guid albumId, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0)
+            return string.Empty;
 
+        // Используем ваш лимит на изображения (10 MB)
+        if (file.Length > MaxImageFileSizeBytes)
+            throw new ArgumentException($"Размер обложки превышает лимит ({MaxImageFileSizeBytes / (1024 * 1024)} MB).");
+
+        // Используем ваш белый список контент-типов (jpeg, png, webp)
+        if (!AllowedImageMimeTypes.Contains(file.ContentType))
+            throw new ArgumentException($"Неподдерживаемый формат изображения '{file.ContentType}'.");
+
+        var albumCoversDir = Path.Combine(_mediaBasePath, "albumcovers");
+        if (!Directory.Exists(albumCoversDir))
+        {
+            Directory.CreateDirectory(albumCoversDir);
+        }
+
+        var fileExtension = Path.GetExtension(file.FileName);
+        var relativePath = Path.Combine("albumcovers", $"{albumId}_album_cover{fileExtension}").Replace('\\', '/');
+        var absolutePath = Path.Combine(_mediaBasePath, relativePath);
+
+        await SaveFileAtomicAsync(file, absolutePath, cancellationToken);
+
+        return relativePath;
+    }
+    
+    
+    
+    
+    
     // ─── private helpers ─────────────────────────────────────────────────────
 
     /// <summary>
