@@ -52,7 +52,7 @@ public class PlaylistsController : ControllerBase
         // Если смотрит чужие - только публичные.
         bool includePrivate = (target == requesterId) || HttpContext.UserIsInRole(AppRoles.Admin);
 
-        var result = await _playlistService.GetUserPlaylistsAsync(target, includePrivate, cancellationToken);
+        var result = await _playlistService.GetUserPlaylistsAsync(target, includePrivate, GetBaseUrl(), cancellationToken);
 
         return Ok(result.Data);
     }

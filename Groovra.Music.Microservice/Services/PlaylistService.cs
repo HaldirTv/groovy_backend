@@ -28,6 +28,7 @@ public class PlaylistService
     {
         return await _context.Playlists
             .AsNoTracking()
+            .Where(p => !p.IsDeleted)
             .FirstOrDefaultAsync(p => p.Id == playlistId, cancellationToken);
     }
 
@@ -81,10 +82,12 @@ public class PlaylistService
     public async Task<ServiceResult<IReadOnlyList<PlaylistListItemDto>>> GetUserPlaylistsAsync(
         Guid targetUserId,
         bool includePrivate,
+        string baseUrl,
         CancellationToken cancellationToken = default)
     {
         var query = _context.Playlists
             .AsNoTracking()
+            .Where(p => !p.IsDeleted)
             .Where(p => p.UserId == targetUserId);
 
         if (!includePrivate)
@@ -100,7 +103,7 @@ public class PlaylistService
                 IsPrivate            = p.IsPrivate,
                 Slug                 = p.Slug,
                 TrackCount           = p.TrackCount,
-                TotalDurationSeconds = (double)p.TotalDurationSeconds, // Каст int базы в double DTO
+                TotalDurationSeconds = (double)p.TotalDurationSeconds,
                 CoverImageUrl        = p.CoverImageUrl,
                 UpdatedAt            = p.UpdatedAt,
                 CollageCovers = p.Tracks
@@ -114,6 +117,16 @@ public class PlaylistService
             })
             .ToListAsync(cancellationToken);
 
+        // Постобработка: превращаем относительные пути локальных треков в полные URL
+        foreach (var item in result)
+        {
+            item.CollageCovers = item.CollageCovers
+                .Select(url => url != null && !url.StartsWith("http")
+                    ? $"{baseUrl}/music/files/{url.Replace('\\', '/')}"
+                    : url)
+                .ToList()!;
+        }
+
         return ServiceResult<IReadOnlyList<PlaylistListItemDto>>.Ok(result);
     }
 
@@ -125,6 +138,7 @@ public class PlaylistService
     CancellationToken cancellationToken = default)
     {
         var playlist = await _context.Playlists
+            .Where(p => !p.IsDeleted)
             .Include(p => p.Tracks.OrderBy(pt => pt.Position))
                 .ThenInclude(pt => pt.Track)
             .FirstOrDefaultAsync(p => p.Id == playlistId, cancellationToken);
@@ -142,7 +156,7 @@ public class PlaylistService
         bool isPrivate,
         CancellationToken cancellationToken = default)
     {
-        var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId, cancellationToken);
+        var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId && !p.IsDeleted, cancellationToken);
         if (playlist is null) return ServiceResult<bool>.Fail("Плейлист не знайдено.");
 
         playlist.IsPrivate = isPrivate;
@@ -159,7 +173,7 @@ public class PlaylistService
         Guid trackId,
         CancellationToken cancellationToken = default)
     {
-        var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId, cancellationToken);
+        var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId && !p.IsDeleted, cancellationToken);
         if (playlist is null) return AddTrackResult.PlaylistNotFound;
 
         var track = await _context.Tracks
@@ -201,7 +215,7 @@ public class PlaylistService
         Guid trackId,
         CancellationToken cancellationToken = default)
     {
-        var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId, cancellationToken);
+        var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId && !p.IsDeleted, cancellationToken);
         if (playlist is null) return ServiceResult<bool>.Fail("Плейлист не знайдено.");
 
         var entry = await _context.PlaylistTracks
@@ -239,7 +253,7 @@ public class PlaylistService
         IList<Guid> orderedTrackIds,
         CancellationToken cancellationToken = default)
     {
-        var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId, cancellationToken);
+        var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId && !p.IsDeleted, cancellationToken);
         if (playlist is null) return ServiceResult<bool>.Fail("Плейлист не знайдено.");
 
         var entries = await _context.PlaylistTracks
@@ -269,7 +283,7 @@ public class PlaylistService
         Guid playlistId,
         CancellationToken cancellationToken = default)
     {
-        var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId, cancellationToken);
+        var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId && !p.IsDeleted, cancellationToken);
         if (playlist is null) return ServiceResult<bool>.Fail("Плейлист не знайдено.");
 
         playlist.IsDeleted = true;
