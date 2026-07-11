@@ -10,6 +10,8 @@ using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Model;
 using Groovra.Shared.ServiceResult;
 using Groovra.Music.Microservice.Result;
+using Groovra.Shared.Constants;
+using Groovra.Shared.Extensions;
 
 namespace Groovra.Music.Microservice.Services;
 
@@ -294,6 +296,68 @@ public class PlaylistService
         return ServiceResult<bool>.Ok(true);
     }
 
+
+    public async Task<ServiceResult<IReadOnlyList<PlaylistListItemDto>>> GetDeletedPlaylistsAsync(
+        Guid userId, string baseUrl, CancellationToken cancellationToken = default)
+    {
+        var result = await _context.Playlists
+            .IgnoreQueryFilters()
+            .Where(p => p.IsDeleted && p.UserId == userId)
+            .OrderByDescending(p => p.DeletedAt)
+            .Select(p => new PlaylistListItemDto
+            {
+                Id                   = p.Id,
+                Title                = p.Title,
+                Description          = p.Description,
+                IsPrivate            = p.IsPrivate,
+                Slug                 = p.Slug,
+                TrackCount           = p.TrackCount,
+                TotalDurationSeconds = (double)p.TotalDurationSeconds,
+                CoverImageUrl        = p.CoverImageUrl,
+                UpdatedAt            = p.UpdatedAt,
+                CollageCovers = p.Tracks
+                    .OrderBy(pt => pt.Position)
+                    .Take(4)
+                    .Select(pt => pt.Track!.IsExternal ? pt.Track.ExternalCoverUrl : pt.Track.CoverImageRelativePath)
+                    .Where(url => url != null)
+                    .ToList()!,
+            })
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in result)
+        {
+            item.CollageCovers = item.CollageCovers
+                .Select(url => url != null && !url.StartsWith("http")
+                    ? $"{baseUrl}/music/files/{url.Replace('\\', '/')}"
+                    : url)
+                .ToList()!;
+        }
+
+        return ServiceResult<IReadOnlyList<PlaylistListItemDto>>.Ok(result);
+    }
+
+
+    public async Task<ServiceResult<bool>> RestorePlaylistAsync(
+        Guid playlistId, Guid currentUserId, string userRoles, CancellationToken cancellationToken = default)
+    {
+        var playlist = await _context.Playlists
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == playlistId && p.IsDeleted, cancellationToken);
+
+        if (playlist is null) 
+            return ServiceResult<bool>.Fail("Видалений плейлист не знайдено.");
+
+        if (playlist.UserId != currentUserId && !userRoles.HasRole(AppRoles.Admin))
+            return ServiceResult<bool>.Fail("Немає прав для відновлення цього плейлиста.");
+
+        playlist.IsDeleted = false;
+        playlist.DeletedAt = null;
+        playlist.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return ServiceResult<bool>.Ok(true);
+    }
+    
     // ─── helpers ──────────────────────────────────────────────────────────────
 
     private static PlaylistDto MapToDto(Playlist p, string baseUrl = "")

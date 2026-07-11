@@ -160,7 +160,36 @@ public class PlaylistsController : ControllerBase
 
         return Ok(new { message = "Трек видалено з плейлиста." });
     }
+    
+    // GET music/playlists/deleted
+    [HttpGet("deleted")]
+    public async Task<IActionResult> GetDeletedPlaylists(CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var currentUserId))
+            return Unauthorized(new { message = "Потрібна авторизація." });
 
+        var result = await _playlistService.GetDeletedPlaylistsAsync(currentUserId, GetBaseUrl(), cancellationToken);
+        return Ok(result.Data);
+    }
+
+// POST music/playlists/{id}/restore
+    [HttpPost("{id:guid}/restore")]
+    public async Task<IActionResult> RestorePlaylist(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var currentUserId))
+            return Unauthorized(new { message = "Потрібна авторизація." });
+
+        var userRole = Request.Headers["X-User-Role"].ToString();
+
+        var result = await _playlistService.RestorePlaylistAsync(id, currentUserId, userRole, cancellationToken);
+        if (!result.Success)
+            return BadRequest(new { message = result.ErrorMessage });
+
+        return Ok(new { message = "Плейлист успішно відновлено." });
+    }
+
+    
+    
     // PUT music/playlists/{id}/tracks/reorder
     [HttpPut("{id:guid}/tracks/reorder")]
     public async Task<IActionResult> ReorderTracks(

@@ -132,6 +132,8 @@ public class AlbumsController : ControllerBase
         });
     }
 
+    
+    
     // GET music/albums/{id}
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetAlbum(Guid id, CancellationToken cancellationToken)
@@ -149,6 +151,8 @@ public class AlbumsController : ControllerBase
         return Ok(result.Data);
     }
 
+    
+    
     // POST music/albums
     [HttpPost]
     [Consumes("multipart/form-data")] 
@@ -200,6 +204,8 @@ public class AlbumsController : ControllerBase
         });
     }
 
+    
+    
     // PATCH music/albums/{id}
     [HttpPatch("{id:guid}")]
     [Consumes("multipart/form-data")] // Указываем, что ждем форму с файлами
@@ -228,6 +234,36 @@ public class AlbumsController : ControllerBase
         return Ok(new { message = "Альбом успішно оновлено." });
     }
 
+    // GET music/albums/deleted
+    [HttpGet("deleted")]
+    public async Task<IActionResult> GetDeletedAlbums(CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var currentUserId))
+            return Unauthorized(new { message = "Потрібна авторизація." });
+
+        var items = await _albumService.GetDeletedAlbumsAsync(currentUserId, GetBaseUrl(), cancellationToken);
+        return Ok(items);
+    }
+
+    
+    
+// POST music/albums/{id}/restore
+    [HttpPost("{id:guid}/restore")]
+    public async Task<IActionResult> RestoreAlbum(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var currentUserId))
+            return Unauthorized(new { message = "Потрібна авторизація." });
+
+        var userRole = Request.Headers["X-User-Role"].ToString();
+
+        var result = await _albumService.RestoreAlbumAsync(id, currentUserId, userRole, cancellationToken);
+        if (!result.Success)
+            return BadRequest(new { message = result.ErrorMessage });
+
+        return Ok(new { message = "Альбом успішно відновлено." });
+    }
+    
+    
     // DELETE music/albums/{id}
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DeleteAlbum(Guid id, CancellationToken cancellationToken)
@@ -249,6 +285,9 @@ public class AlbumsController : ControllerBase
         return Ok(new { message = "Альбом видалено." });
     }
 
+    
+    
+    
     // DELETE music/albums/{id}/tracks/{trackId}
     [HttpDelete("{id:guid}/tracks/{trackId:guid}")]
     public async Task<IActionResult> RemoveTrack(
@@ -274,6 +313,9 @@ public class AlbumsController : ControllerBase
         return Ok(new { message = "Трек видалено з альбому." });
     }
 
+    
+    
+    
     // POST music/albums/generate-random?albumsCount=3&tracksPerAlbum=6&genre=Pop
     [HttpPost("generate-random")]
     public async Task<IActionResult> GenerateRandomAlbums(

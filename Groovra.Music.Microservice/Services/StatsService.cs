@@ -20,6 +20,7 @@ public class StatsService
     {
         
         var totalPlays = await _db.Tracks
+            .IgnoreQueryFilters() 
             .Where(t => t.UserId == artistUserId)
             .SumAsync(t => t.PlayCount, cancellationToken);
 

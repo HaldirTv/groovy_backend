@@ -35,6 +35,7 @@ public class MusicDbContext : DbContext
             entity.Property(t => t.IsExternal).HasDefaultValue(false);
             
             entity.Property(t => t.PlayCount).IsRequired().HasDefaultValue(0L);
+            entity.HasQueryFilter(t => !t.IsDeleted);
         });
         
         modelBuilder.Entity<Playlist>(b =>
@@ -100,5 +101,6 @@ public class MusicDbContext : DbContext
                 .HasForeignKey(fa => fa.AlbumId)
                 .OnDelete(DeleteBehavior.Cascade); // лайк удаляется вместе с альбомом
         });
+        
     }
 }

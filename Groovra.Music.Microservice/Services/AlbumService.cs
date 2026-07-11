@@ -3,6 +3,8 @@ using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Model;
 using Groovra.Shared.ServiceResult;
 using Groovra.Music.Microservice.Result;
+using Groovra.Shared.Constants;
+using Groovra.Shared.Extensions;
 
 namespace Groovra.Music.Microservice.Services;
 
@@ -306,26 +308,71 @@ public class AlbumService
         Guid albumId,
         CancellationToken cancellationToken = default)
     {
+        // 1. Находим сам альбом
         var album = await _context.Albums.FirstOrDefaultAsync(a => a.Id == albumId && !a.IsDeleted, cancellationToken);
-        if (album is null) return ServiceResult<bool>.Fail("Альбом не знайдено.");
+        if (album is null) 
+            return ServiceResult<bool>.Fail("Альбом не знайдено.");
 
-        await _context.Tracks
-            .Where(t => t.AlbumId == albumId)
-            .ExecuteUpdateAsync(
-                s => s.SetProperty(t => t.AlbumId, t => (Guid?)null)
-                      .SetProperty(t => t.AlbumTitle, t => null), // Сбрасываем и имя альбома
-                cancellationToken);
+        var now = DateTime.UtcNow;
 
+        // 2. Мягко удаляем ТОЛЬКО альбом. 
+        // Треки вообще НЕ ТРОГАЕМ. Их AlbumId остается на месте!
         album.IsDeleted = true;
-        album.DeletedAt = DateTime.UtcNow;
-        album.UpdatedAt = DateTime.UtcNow;
+        album.DeletedAt = now;
+        album.UpdatedAt = now;
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Album soft-deleted. Id={Id}", albumId);
+        _logger.LogInformation("Album soft-deleted. Tracks preserved. Id={Id}", albumId);
         return ServiceResult<bool>.Ok(true);
     }
+    
+    
+    
+    public async Task<IReadOnlyList<AlbumListItemDto>> GetDeletedAlbumsAsync(Guid userId, string baseUrl, CancellationToken cancellationToken = default)
+    {
+        var albums = await _context.Albums
+            .IgnoreQueryFilters()
+            .Where(a => a.IsDeleted && a.UserId == userId)
+            .OrderByDescending(a => a.DeletedAt)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
 
+        return albums.Select(a => new AlbumListItemDto
+        {
+            Id                   = a.Id,
+            Title                = a.Title,
+            ArtistName           = a.ArtistName,
+            CoverImageUrl        = BuildCoverUrl(a, baseUrl),
+            TrackCount           = a.TrackCount,
+            TotalDurationSeconds = a.TotalDurationSeconds,
+            ReleaseDate          = a.ReleaseDate,
+            IsLiked              = false
+        }).ToList();
+    }
+    
+    public async Task<ServiceResult<bool>> RestoreAlbumAsync(Guid albumId, Guid currentUserId, string userRoles, CancellationToken cancellationToken = default)
+    {
+        var album = await _context.Albums
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(a => a.Id == albumId && a.IsDeleted, cancellationToken);
+
+        if (album is null) 
+            return ServiceResult<bool>.Fail("Видалений альбом не знайдено.");
+
+        if (album.UserId != currentUserId && !userRoles.HasRole(AppRoles.Admin))
+            return ServiceResult<bool>.Fail("Немає прав для відновлення цього альбому.");
+
+        album.IsDeleted = false;
+        album.DeletedAt = null;
+        album.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return ServiceResult<bool>.Ok(true);
+    }
+    
+    
+    
     // ─── GenerateRandomAlbums (bulk seed для тестових даних) ───────────────────────
     public async Task<ServiceResult<List<AlbumDto>>> GenerateRandomAlbumsAsync(
         Guid ownerUserId,

@@ -1,6 +1,7 @@
 using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Model;
 using Groovra.Music.Microservice.Services;
+using Groovra.Shared.Constants;
 using Groovra.Shared.Extensions;
 using Microsoft.AspNetCore.Mvc;
 
@@ -24,7 +25,50 @@ public class TracksController : ControllerBase
         _logger = logger;
         _favoritesService = favoritesService;
     }
+    
+    // GET music/tracks/me
+    [HttpGet("me")]
+    [ProducesResponseType(typeof(PagedResultDto<TrackDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMyTracks(
+        [FromQuery] string? search,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+    
+        if (!HttpContext.TryGetUserId(out var currentUserId))
+            return Unauthorized(new { message = "Потрібна авторизація." });
 
+        var userRole = Request.Headers["X-User-Role"].ToString();
+        if (!userRole.HasRole(AppRoles.Artist) && !userRole.HasRole(AppRoles.Admin))
+            return StatusCode(StatusCodes.Status403Forbidden, 
+                new { message = "Тільки артисти мають власні треки." });
+
+
+        if (pageNumber < 1) pageNumber = 1;
+        if (pageSize < 1) pageSize = 20;
+        if (pageSize > 100) pageSize = 100;
+
+       
+        var (tracks, totalCount) = await _musicService.GetAllTracksAsync(
+            search, currentUserId, pageNumber, pageSize, cancellationToken);
+
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+
+        
+        var likedIds = await _favoritesService.GetLikedTrackIdsAsync(currentUserId, cancellationToken);
+
+    
+        var trackDtos = tracks
+            .Select(t => MapToDto(t, baseUrl, likedIds.Contains(t.Id)))
+            .ToList();
+
+        return Ok(new PagedResultDto<TrackDto>(trackDtos, totalCount, pageNumber, pageSize));
+    }
+    
+    
+    
+    
     [HttpGet]
     [ProducesResponseType(typeof(PagedResultDto<TrackDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAllTracks(
@@ -58,7 +102,45 @@ public class TracksController : ControllerBase
         var result = new PagedResultDto<TrackDto>(trackDtos, totalCount, pageNumber, pageSize);
         return Ok(result);
     }
+    
+    
+    
+    
+    [HttpGet("deleted")]
+    public async Task<IActionResult> GetDeletedTracks(CancellationToken cancellationToken)
+    {
+        if (!HttpContext.TryGetUserId(out var currentUserId))
+            return Unauthorized(new { Error = "Потрібна авторизація." });
 
+        var tracks = await _musicService.GetDeletedTracksAsync(currentUserId, cancellationToken);
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+
+        // Для удаленных треков лайки не проверяем, передаем false
+        var trackDtos = tracks.Select(t => MapToDto(t, baseUrl, isLiked: false)).ToList();
+        return Ok(trackDtos);
+    }
+    
+    [HttpPost("{id:guid}/restore")]
+    public async Task<IActionResult> RestoreTrack(Guid id, CancellationToken cancellationToken)
+    {
+        if (!HttpContext.TryGetUserId(out var currentUserId))
+            return Unauthorized(new { Error = "Потрібна авторизація." });
+
+        var userRole = Request.Headers["X-User-Role"].ToString();
+
+        try
+        {
+            var result = await _musicService.RestoreTrackAsync(id, currentUserId, userRole, cancellationToken); 
+            if (!result) return NotFound(new { Error = "Видалений трек не знайдено." });
+
+            return Ok(new { message = "Трек успішно відновлено." });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Error = ex.Message });
+        }
+    }
+    
 
     // ─── GET /music/tracks/{id} ───────────────────────────────────────────────
 
@@ -82,6 +164,8 @@ public class TracksController : ControllerBase
         return Ok(MapToDto(track, baseUrl));
     }
 
+    
+    
     // ─── GET /music/tracks/{id}/stream ───────────────────────────────────────
 
     /// <summary>
@@ -154,6 +238,8 @@ public class TracksController : ControllerBase
         return PhysicalFile(absolutePath, contentType, enableRangeProcessing: true);
     }
 
+    
+    
     // ─── DELETE /music/tracks/{id} ────────────────────────────────────────────
 
     /// <summary>
@@ -202,6 +288,8 @@ public class TracksController : ControllerBase
         }
     }
 
+    
+    
     // ─── PATCH /music/tracks/{id}/title ──────────────────────────────────────
 
     /// <summary>
