@@ -76,7 +76,7 @@ public class PlaylistService
         await _context.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Playlist created. Id={Id}, Slug={Slug}", playlist.Id, playlist.Slug);
-        return ServiceResult<PlaylistDto>.Ok(MapToDto(playlist, baseUrl)); 
+        return ServiceResult<PlaylistDto>.Ok(MapToDto(playlist, baseUrl, isLiked: false)); 
     }
 
     // ─── GetUserPlaylists ─────────────────────────────────────────────────────
@@ -84,7 +84,6 @@ public class PlaylistService
     public async Task<ServiceResult<IReadOnlyList<PlaylistListItemDto>>> GetUserPlaylistsAsync(
         Guid targetUserId,
         bool includePrivate,
-        string baseUrl,
         CancellationToken cancellationToken = default)
     {
         var query = _context.Playlists
@@ -103,9 +102,9 @@ public class PlaylistService
                 Title                = p.Title,
                 Description          = p.Description,
                 IsPrivate            = p.IsPrivate,
-                Slug                 = p.Slug,
+                Slug                 = p.Slug ?? string.Empty,
                 TrackCount           = p.TrackCount,
-                TotalDurationSeconds = (double)p.TotalDurationSeconds,
+                TotalDurationSeconds = p.TotalDurationSeconds,
                 CoverImageUrl        = p.CoverImageUrl,
                 UpdatedAt            = p.UpdatedAt,
                 CollageCovers = p.Tracks
@@ -115,19 +114,10 @@ public class PlaylistService
                         ? pt.Track.ExternalCoverUrl
                         : pt.Track.CoverImageRelativePath)
                     .Where(url => url != null)
-                    .ToList()!,
+                    .Select(url => url!)
+                    .ToList(),
             })
             .ToListAsync(cancellationToken);
-
-        // Постобработка: превращаем относительные пути локальных треков в полные URL
-        foreach (var item in result)
-        {
-            item.CollageCovers = item.CollageCovers
-                .Select(url => url != null && !url.StartsWith("http")
-                    ? $"{baseUrl}/music/files/{url.Replace('\\', '/')}"
-                    : url)
-                .ToList()!;
-        }
 
         return ServiceResult<IReadOnlyList<PlaylistListItemDto>>.Ok(result);
     }
@@ -135,9 +125,10 @@ public class PlaylistService
     // ─── GetById ──────────────────────────────────────────────────────────────
 
     public async Task<ServiceResult<PlaylistDto>> GetPlaylistByIdAsync(
-    Guid playlistId,
-    string baseUrl,              // ← додали
-    CancellationToken cancellationToken = default)
+        Guid playlistId,
+        string baseUrl,
+        bool isLiked = false,
+        CancellationToken cancellationToken = default)
     {
         var playlist = await _context.Playlists
             .Where(p => !p.IsDeleted)
@@ -148,7 +139,7 @@ public class PlaylistService
         if (playlist is null)
             return ServiceResult<PlaylistDto>.Fail("Плейлист не знайдено.");
 
-        return ServiceResult<PlaylistDto>.Ok(MapToDto(playlist, baseUrl));
+        return ServiceResult<PlaylistDto>.Ok(MapToDto(playlist, baseUrl, isLiked));
     }
 
     // ─── UpdatePrivacy ────────────────────────────────────────────────────────
@@ -217,6 +208,8 @@ public class PlaylistService
         Guid trackId,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
         var playlist = await _context.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId && !p.IsDeleted, cancellationToken);
         if (playlist is null) return ServiceResult<bool>.Fail("Плейлист не знайдено.");
 
@@ -232,8 +225,13 @@ public class PlaylistService
             .FirstOrDefaultAsync(cancellationToken);
 
         var removedPosition = entry.Position;
+    
+        // 1. Удаляем запись из контекста
         _context.PlaylistTracks.Remove(entry);
+        // ФИКС: Физически удаляем трек из базы прямо сейчас, чтобы освободить его порядковый номер (Position)
+        await _context.SaveChangesAsync(cancellationToken); 
 
+        // 2. Теперь безопасно сдвигаем позиции оставшихся треков
         await _context.PlaylistTracks
             .Where(pt => pt.PlaylistId == playlistId && pt.Position > removedPosition)
             .ExecuteUpdateAsync(
@@ -245,6 +243,7 @@ public class PlaylistService
         playlist.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return ServiceResult<bool>.Ok(true);
     }
 
@@ -360,7 +359,7 @@ public class PlaylistService
     
     // ─── helpers ──────────────────────────────────────────────────────────────
 
-    private static PlaylistDto MapToDto(Playlist p, string baseUrl = "")
+    private static PlaylistDto MapToDto(Playlist p, string baseUrl = "", bool isLiked = false)
     {
         return new PlaylistDto(
             p.Id,
@@ -370,8 +369,9 @@ public class PlaylistService
             p.Slug,
             p.CoverImageUrl,
             p.TrackCount,
-            (double)p.TotalDurationSeconds,
+            p.TotalDurationSeconds,
             p.IsPrivate,
+            isLiked,
             p.CreatedAt,
             p.Tracks?.Select(pt => new PlaylistTrackDto(
                 pt.TrackId,

@@ -216,9 +216,6 @@ public class TracksController : ControllerBase
         // ─── ФИШКА: Если трек из Jamendo ────────────────────────────────────────
         if (track.IsExternal)
         {
-            // Атомарно увеличиваем счетчик прослушиваний в нашей БД (fire-and-forget)!
-            await _musicService.IncrementPlayCountAsync(userId,id, CancellationToken.None);
-
             _logger.LogInformation("Stream (External): редирект трека {TrackId} на Jamendo URL.", id);
 
             // Перенаправляем браузер/плеер фронтенда качать трек напрямую с серверов Jamendo
@@ -232,10 +229,30 @@ public class TracksController : ControllerBase
         var (absolutePath, contentType) = fileInfo.Value;
         if (!System.IO.File.Exists(absolutePath)) return NotFound();
 
-        await _musicService.IncrementPlayCountAsync(userId,id, CancellationToken.None);
         Response.Headers.CacheControl = "public, max-age=31536000, immutable";
 
         return PhysicalFile(absolutePath, contentType, enableRangeProcessing: true);
+    }
+
+    // POST music/tracks/{id}/play
+    [HttpPost("{id:guid}/play")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> MarkTrackAsPlayed(Guid id, CancellationToken cancellationToken = default)
+    {
+        if (!HttpContext.TryGetUserId(out var userId))
+            return Unauthorized(new { Error = "Streaming requires authentication." });
+
+        var trackExists = await _musicService.GetTrackByIdAsync(id, cancellationToken);
+        if (trackExists is null)
+            return NotFound(new { Error = "Трек не найден." });
+
+        var result = await _musicService.IncrementPlayCountAsync(userId, id, cancellationToken);
+        if (!result)
+            return NotFound(new { Error = "Трек не найден." });
+
+        return Ok(new { message = "Play count updated." });
     }
 
     

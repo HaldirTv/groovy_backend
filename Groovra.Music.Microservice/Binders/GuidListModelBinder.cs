@@ -39,6 +39,8 @@ public class GuidListModelBinder : IModelBinder
             {
                 bindingContext.ModelState.TryAddModelError(
                     bindingContext.ModelName, "Некорректный JSON-массив в TrackIds.");
+                bindingContext.Result = ModelBindingResult.Failed(); 
+                return Task.CompletedTask; 
             }
         }
         else

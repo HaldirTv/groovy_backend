@@ -13,6 +13,7 @@ public class MusicDbContext : DbContext
     
     public DbSet<Album> Albums { get; set; }
     public DbSet<FavoriteAlbum> FavoriteAlbums { get; set; }
+    public DbSet<FavoritePlaylist> FavoritePlaylists { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -101,6 +102,19 @@ public class MusicDbContext : DbContext
                 .HasForeignKey(fa => fa.AlbumId)
                 .OnDelete(DeleteBehavior.Cascade); // лайк удаляется вместе с альбомом
         });
+        
+        
+        modelBuilder.Entity<FavoritePlaylist>(b =>
+        {
+            b.ToTable("FavoritePlaylists", "music");
+            b.HasKey(fp => new { fp.UserId, fp.PlaylistId });
+            
+            b.HasOne(fp => fp.Playlist)
+                .WithMany()
+                .HasForeignKey(fp => fp.PlaylistId)
+                .OnDelete(DeleteBehavior.Cascade); // Лайк исчезает, если плейлист удален физически
+        });
+        
         
     }
 }

@@ -113,6 +113,12 @@ app.UseStaticFiles(new StaticFileOptions
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(coversPath),
     RequestPath  = "/music/files/covers"
 });
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(Path.Combine(mediaPath, "albumcovers")),
+    RequestPath = "/music/files/albumcovers"
+});
+
 // ───────────────────────────────────────────────────────────────────────────────
 
 app.UseAuthorization();

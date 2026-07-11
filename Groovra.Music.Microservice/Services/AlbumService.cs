@@ -375,57 +375,50 @@ public class AlbumService
     
     // ─── GenerateRandomAlbums (bulk seed для тестових даних) ───────────────────────
     public async Task<ServiceResult<List<AlbumDto>>> GenerateRandomAlbumsAsync(
-        Guid ownerUserId,
-        string artistName,
-        int albumsCount,
-        int tracksPerAlbum,
-        string? genre,
-        string baseUrl,
-        bool onlySystemTracks = true,
+        Guid ownerUserId, string artistName, int albumsCount, int tracksPerAlbum, 
+        string? genre, string baseUrl, bool onlySystemTracks = true, 
         CancellationToken cancellationToken = default)
     {
         var createdAlbums = new List<AlbumDto>();
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
 
         for (int i = 0; i < albumsCount; i++)
         {
             var album = new Album
             {
-                Id                   = Guid.NewGuid(),
-                UserId               = ownerUserId,
-                Title                = $"Generated Album {DateTime.UtcNow:yyyyMMddHHmmss}-{i + 1}",
-                ArtistName           = artistName.Trim(),
-                TrackCount           = 0,
+                Id = Guid.NewGuid(),
+                UserId = ownerUserId,
+                Title = $"Generated Album {DateTime.UtcNow:yyyyMMddHHmmss}-{i + 1}",
+                ArtistName = artistName.Trim(),
+                TrackCount = 0,
                 TotalDurationSeconds = 0,
-                IsDeleted            = false,
-                CreatedAt            = DateTime.UtcNow,
-                UpdatedAt            = DateTime.UtcNow,
+                IsDeleted = false,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
             };
 
+            // Добавляем альбом в контекст, но НЕ сохраняем ещё
             _context.Albums.Add(album);
-            await _context.SaveChangesAsync(cancellationToken);
 
             var fillResult = await FillAlbumWithRandomTracksAsync(
                 album.Id, tracksPerAlbum, genre, baseUrl, onlySystemTracks, cancellationToken);
 
             if (!fillResult.Success)
             {
-                _logger.LogWarning(
-                    "GenerateRandomAlbums: не вдалося наповнити альбом {AlbumId} треками. Reason={Reason}",
-                    album.Id, fillResult.ErrorMessage);
-
-                _context.Albums.Remove(album);
-                await _context.SaveChangesAsync(cancellationToken);
-                break; 
+                _logger.LogWarning("Не удалось заполнить альбом {AlbumId}. Причина: {Reason}", album.Id, fillResult.ErrorMessage);
+                // Откатываем транзакцию – все изменения в этом цикле отменятся
+                await transaction.RollbackAsync(cancellationToken);
+                return ServiceResult<List<AlbumDto>>.Fail($"Не удалось создать альбом: {fillResult.ErrorMessage}");
             }
 
             createdAlbums.Add(fillResult.Data!);
         }
 
-        if (!createdAlbums.Any())
-            return ServiceResult<List<AlbumDto>>.Fail("Не вдалося згенерувати жодного альбому — недостатньо вільних треків у базі (з урахуванням фільтрів).");
+        // Сохраняем все альбомы и треки одной транзакцией
+        await _context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
-        _logger.LogInformation("Generated {Count} random albums for user {UserId}", createdAlbums.Count, ownerUserId);
-
+        _logger.LogInformation("Сгенерировано {Count} альбомов", createdAlbums.Count);
         return ServiceResult<List<AlbumDto>>.Ok(createdAlbums);
     }
 

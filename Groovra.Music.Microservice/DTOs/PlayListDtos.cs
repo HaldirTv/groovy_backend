@@ -25,6 +25,7 @@ public record PlaylistDto(
     int TrackCount,
     double TotalDurationSeconds,
     bool IsPrivate,
+    bool IsLiked,
     DateTime CreatedAt,
     IList<PlaylistTrackDto> Tracks
 );
@@ -45,10 +46,15 @@ public class PlaylistListItemDto
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public bool IsPrivate { get; set; }
+    public bool IsLiked { get; set; }
     public string Slug { get; set; } = string.Empty;
     public int TrackCount { get; set; }
     public double TotalDurationSeconds { get; set; }
     public string? CoverImageUrl { get; set; }
     public DateTime UpdatedAt { get; set; }
     public List<string> CollageCovers { get; set; } = new();
+}
+public class LikePlaylistRequestDto
+{
+    public Guid PlaylistId { get; set; }
 }

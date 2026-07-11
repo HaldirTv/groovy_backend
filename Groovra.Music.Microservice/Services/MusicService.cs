@@ -168,6 +168,8 @@ public class MusicService
     string userRoles, 
     CancellationToken cancellationToken)
     {
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+
         var track = await _db.Tracks.FirstOrDefaultAsync(t => t.Id == trackId, cancellationToken);
 
         if (track is null)
@@ -188,11 +190,11 @@ public class MusicService
         if (track.AlbumId.HasValue)
         {
             await _db.Albums
-                .Where(a => a.Id == track.AlbumId.Value)
+                .Where(a => a.Id == track.AlbumId.Value && !a.IsDeleted) 
                 .ExecuteUpdateAsync(
                     s => s.SetProperty(a => a.TrackCount, a => a.TrackCount - 1)
-                          .SetProperty(a => a.TotalDurationSeconds, a => a.TotalDurationSeconds - track.DurationSeconds)
-                          .SetProperty(a => a.UpdatedAt, a => DateTime.UtcNow),
+                        .SetProperty(a => a.TotalDurationSeconds, a => a.TotalDurationSeconds - track.DurationSeconds)
+                        .SetProperty(a => a.UpdatedAt, a => DateTime.UtcNow),
                     cancellationToken);
         }
 
@@ -230,6 +232,7 @@ public class MusicService
 
         // Никакого _db.Tracks.Remove(track)! Просто сохраняем изменения флагов.
         await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         _logger.LogInformation("Трек успешно переведен в статус Soft-Deleted. Id={TrackId}, Title={Title}", trackId, track.Title);
         return true;
@@ -283,8 +286,11 @@ public class MusicService
     /// <param name="trackId">GUID трека.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
     /// <returns>True — счётчик обновлён; false — трек не найден.</returns>
-    public async Task<bool> IncrementPlayCountAsync(Guid userId,Guid trackId, CancellationToken cancellationToken = default)
+    public async Task<bool> IncrementPlayCountAsync(Guid userId, Guid trackId, CancellationToken cancellationToken = default)
     {
+ 
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+
         var updated = await _db.Tracks
             .Where(t => t.Id == trackId)
             .ExecuteUpdateAsync(
@@ -296,12 +302,24 @@ public class MusicService
             _logger.LogWarning("IncrementPlayCount: трек {TrackId} не найден.", trackId);
             return false;
         }
-        await _publishEndpoint.Publish(new TrackPlayedEvent(
-            UserId: userId,
-            TrackId: trackId,
-            PlayedAt: DateTime.UtcNow
-        ), cancellationToken);
-        
+
+        try
+        {
+
+            await _publishEndpoint.Publish(new TrackPlayedEvent(
+                UserId: userId,
+                TrackId: trackId,
+                PlayedAt: DateTime.UtcNow
+            ), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Не удалось опубликовать TrackPlayedEvent для трека {TrackId}. Откат транзакции.", trackId);
+            await transaction.RollbackAsync(cancellationToken);
+            throw; // Пробрасываем ошибку выше для корректного ответа API (500)
+        }
+
+        await transaction.CommitAsync(cancellationToken);
         _logger.LogDebug("PlayCount увеличен для трека {TrackId}.", trackId);
         return true;
     }

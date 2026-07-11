@@ -27,8 +27,7 @@ public class GarbageCollectorService
     public async Task CleanUpGarbageAsync(CancellationToken cancellationToken = default)
     {
         // Каждая запись живет в корзине ровно 30 дней с момента удаления
-        //var expiryDate = DateTime.UtcNow.AddDays(-30);
-        var expiryDate = DateTime.UtcNow.AddMinutes(2);
+        var expiryDate = DateTime.UtcNow.AddDays(-30);
 
         _logger.LogInformation("Запуск планової очистки кошика Hangfire. Поріг дати: {ExpiryDate}", expiryDate);
 
@@ -77,6 +76,11 @@ public class GarbageCollectorService
 
         if (oldAlbums.Any())
         {
+            foreach (var album in oldAlbums)
+            {
+                DeleteLocalFile(album.CoverImageRelativePath);
+            }
+
             _db.Albums.RemoveRange(oldAlbums);
             _logger.LogInformation("Жорстко видалено альбомів із бази: {Count}", oldAlbums.Count);
         }
