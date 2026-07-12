@@ -4,6 +4,7 @@ using Groovra.Music.Microservice.Model;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Groovra.Music.Microservice.Migrations
 {
     [DbContext(typeof(MusicDbContext))]
-    partial class MusicDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260710170521_AddSoftDeleteToTracksDate")]
+    partial class AddSoftDeleteToTracksDate
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -90,24 +93,6 @@ namespace Groovra.Music.Microservice.Migrations
                     b.HasIndex("AlbumId");
 
                     b.ToTable("FavoriteAlbums", "music");
-                });
-
-            modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoritePlaylist", b =>
-                {
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("PlaylistId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("UserId", "PlaylistId");
-
-                    b.HasIndex("PlaylistId");
-
-                    b.ToTable("FavoritePlaylists", "music");
                 });
 
             modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoriteTrack", b =>
@@ -308,17 +293,6 @@ namespace Groovra.Music.Microservice.Migrations
                         .IsRequired();
 
                     b.Navigation("Album");
-                });
-
-            modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoritePlaylist", b =>
-                {
-                    b.HasOne("Groovra.Music.Microservice.Model.Playlist", "Playlist")
-                        .WithMany()
-                        .HasForeignKey("PlaylistId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Playlist");
                 });
 
             modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoriteTrack", b =>

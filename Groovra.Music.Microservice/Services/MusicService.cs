@@ -112,6 +112,53 @@ public class MusicService
         var absolutePath = Path.Combine(_mediaBasePath, track.AudioRelativePath);
         return (absolutePath, track.ContentType);
     }
+    
+    
+    
+    public async Task<IReadOnlyList<Track>> GetDeletedTracksAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        return await _db.Tracks
+            .IgnoreQueryFilters()
+            .Where(t => t.IsDeleted && t.UserId == userId)
+            .OrderByDescending(t => t.DeletedAt)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+    }
+    
+    public async Task<bool> RestoreTrackAsync(Guid trackId, Guid currentUserId, string userRoles, CancellationToken cancellationToken = default)
+    {
+        var track = await _db.Tracks
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == trackId && t.IsDeleted, cancellationToken);
+    
+        if (track is null) return false;
+    
+        if (track.UserId != currentUserId && !userRoles.HasRole(AppRoles.Admin))
+        {
+            throw new UnauthorizedAccessException("You do not have permission to restore this track.");
+        }
+    
+        track.IsDeleted = false;
+        track.DeletedAt = null;
+    
+        
+        if (track.AlbumId.HasValue)
+        {
+            var album = await _db.Albums
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(a => a.Id == track.AlbumId.Value && !a.IsDeleted, cancellationToken);
+                
+            if (album != null)
+            {
+                album.TrackCount++;
+                album.TotalDurationSeconds += track.DurationSeconds;
+                album.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+    
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
 
     // ─── Delete ──────────────────────────────────────────────────────────────
     
@@ -120,74 +167,76 @@ public class MusicService
     Guid currentUserId, 
     string userRoles, 
     CancellationToken cancellationToken)
-{
-    var track = await _db.Tracks.FirstOrDefaultAsync(t => t.Id == trackId, cancellationToken);
-
-    if (track is null)
     {
-        _logger.LogWarning("Delete: трек {TrackId} не найден.", trackId);
-        return false;
-    }
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
 
-    if (track.UserId != currentUserId && userRoles.HasRole(AppRoles.Admin) == false)
-    {
-        _logger.LogWarning("Security violation: Юзер {UserId} с ролью {Role} пытался удалить чужой трек {TrackId}", 
-            currentUserId, userRoles, trackId);
-        
-        throw new UnauthorizedAccessException("You do not have permission to delete this track.");
-    }
+        var track = await _db.Tracks.FirstOrDefaultAsync(t => t.Id == trackId, cancellationToken);
 
-    // ── Синхронизация с альбомом (если трек был частью альбома) ────────────
-    if (track.AlbumId.HasValue)
-    {
-        await _db.Albums
-            .Where(a => a.Id == track.AlbumId.Value)
-            .ExecuteUpdateAsync(
-                s => s.SetProperty(a => a.TrackCount, a => a.TrackCount - 1)
-                      .SetProperty(a => a.TotalDurationSeconds, a => a.TotalDurationSeconds - track.DurationSeconds)
-                      .SetProperty(a => a.UpdatedAt, a => DateTime.UtcNow),
-                cancellationToken);
-    }
-
-    // ── Синхронизация с плейлистами (удаляем трек из всех плейлистов) ──────
-    var playlistEntries = await _db.PlaylistTracks
-        .Where(pt => pt.TrackId == trackId)
-        .ToListAsync(cancellationToken);
-
-    if (playlistEntries.Any())
-    {
-        var affectedPlaylistIds = playlistEntries.Select(pt => pt.PlaylistId).Distinct().ToList();
-
-        _db.PlaylistTracks.RemoveRange(playlistEntries);
-
-        foreach (var playlistId in affectedPlaylistIds)
+        if (track is null)
         {
-            await _db.Playlists
-                .Where(p => p.Id == playlistId)
+            _logger.LogWarning("Delete: трек {TrackId} не найден.", trackId);
+            return false;
+        }
+
+        if (track.UserId != currentUserId && userRoles.HasRole(AppRoles.Admin) == false)
+        {
+            _logger.LogWarning("Security violation: Юзер {UserId} с ролью {Role} пытался удалить чужой трек {TrackId}", 
+                currentUserId, userRoles, trackId);
+            
+            throw new UnauthorizedAccessException("You do not have permission to delete this track.");
+        }
+
+        // ── 1. Синхронизация с альбомом (ОСТАВЛЯЕМ) ───────────────────────────
+        if (track.AlbumId.HasValue)
+        {
+            await _db.Albums
+                .Where(a => a.Id == track.AlbumId.Value && !a.IsDeleted) 
                 .ExecuteUpdateAsync(
-                    s => s.SetProperty(p => p.TrackCount, p => p.TrackCount - 1)
-                          .SetProperty(p => p.TotalDurationSeconds, p => p.TotalDurationSeconds - (int)Math.Round(track.DurationSeconds))
-                          .SetProperty(p => p.UpdatedAt, p => DateTime.UtcNow),
+                    s => s.SetProperty(a => a.TrackCount, a => a.TrackCount - 1)
+                        .SetProperty(a => a.TotalDurationSeconds, a => a.TotalDurationSeconds - track.DurationSeconds)
+                        .SetProperty(a => a.UpdatedAt, a => DateTime.UtcNow),
                     cancellationToken);
         }
+
+        // ── 2. Синхронизация с плейлистами (ОСТАВЛЯЕМ) ────────────────────────
+        // Из плейлистов трек убираем сразу, чтобы у пользователей не ломались кастомные списки
+        var playlistEntries = await _db.PlaylistTracks
+            .Where(pt => pt.TrackId == trackId)
+            .ToListAsync(cancellationToken);
+
+        if (playlistEntries.Any())
+        {
+            var affectedPlaylistIds = playlistEntries.Select(pt => pt.PlaylistId).Distinct().ToList();
+
+            _db.PlaylistTracks.RemoveRange(playlistEntries);
+
+            foreach (var playlistId in affectedPlaylistIds)
+            {
+                await _db.Playlists
+                    .Where(p => p.Id == playlistId)
+                    .ExecuteUpdateAsync(
+                        s => s.SetProperty(p => p.TrackCount, p => p.TrackCount - 1)
+                              .SetProperty(p => p.TotalDurationSeconds, p => p.TotalDurationSeconds - (int)Math.Round(track.DurationSeconds))
+                              .SetProperty(p => p.UpdatedAt, p => DateTime.UtcNow),
+                        cancellationToken);
+            }
+        }
+
+        // ── 3. ЛАЙКИ И ФАЙЛЫ НЕ ТРОГАЕМ ────────────────────────────────────────
+        // Кнопку ExecuteDeleteAsync для FavoriteTracks и методы DeleteFileIfExists убираем.
+        // Они остаются в базе, но за счет флага IsDeleted отфильтруются в FavoritesService.
+
+        // ── 4. РЕАЛИЗАЦИЯ SOFT DELETE ──────────────────────────────────────────
+        track.IsDeleted = true;
+        track.DeletedAt = DateTime.UtcNow;
+
+        // Никакого _db.Tracks.Remove(track)! Просто сохраняем изменения флагов.
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        _logger.LogInformation("Трек успешно переведен в статус Soft-Deleted. Id={TrackId}, Title={Title}", trackId, track.Title);
+        return true;
     }
-
-    // ── Чистим лайки трека ──────────────────────────────────────────────────
-    await _db.FavoriteTracks
-        .Where(f => f.TrackId == trackId)
-        .ExecuteDeleteAsync(cancellationToken);
-
-    DeleteFileIfExists(Path.Combine(_mediaBasePath, track.AudioRelativePath));
-
-    if (track.CoverImageRelativePath is not null)
-        DeleteFileIfExists(Path.Combine(_mediaBasePath, track.CoverImageRelativePath));
-
-    _db.Tracks.Remove(track);
-    await _db.SaveChangesAsync(cancellationToken);
-
-    _logger.LogInformation("Трек успешно удалён. Id={TrackId}, Title={Title}", trackId, track.Title);
-    return true;
-}
 
     // ─── Rename ──────────────────────────────────────────────────────────────
 
@@ -237,8 +286,11 @@ public class MusicService
     /// <param name="trackId">GUID трека.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
     /// <returns>True — счётчик обновлён; false — трек не найден.</returns>
-    public async Task<bool> IncrementPlayCountAsync(Guid userId,Guid trackId, CancellationToken cancellationToken = default)
+    public async Task<bool> IncrementPlayCountAsync(Guid userId, Guid trackId, CancellationToken cancellationToken = default)
     {
+ 
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+
         var updated = await _db.Tracks
             .Where(t => t.Id == trackId)
             .ExecuteUpdateAsync(
@@ -250,12 +302,24 @@ public class MusicService
             _logger.LogWarning("IncrementPlayCount: трек {TrackId} не найден.", trackId);
             return false;
         }
-        await _publishEndpoint.Publish(new TrackPlayedEvent(
-            UserId: userId,
-            TrackId: trackId,
-            PlayedAt: DateTime.UtcNow
-        ), cancellationToken);
-        
+
+        try
+        {
+
+            await _publishEndpoint.Publish(new TrackPlayedEvent(
+                UserId: userId,
+                TrackId: trackId,
+                PlayedAt: DateTime.UtcNow
+            ), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Не удалось опубликовать TrackPlayedEvent для трека {TrackId}. Откат транзакции.", trackId);
+            await transaction.RollbackAsync(cancellationToken);
+            throw; // Пробрасываем ошибку выше для корректного ответа API (500)
+        }
+
+        await transaction.CommitAsync(cancellationToken);
         _logger.LogDebug("PlayCount увеличен для трека {TrackId}.", trackId);
         return true;
     }

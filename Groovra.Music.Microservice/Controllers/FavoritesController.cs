@@ -97,6 +97,48 @@ public class FavoritesController : ControllerBase
         var albums = await _favoritesService.GetUserFavoriteAlbumsAsync(userId, baseUrl);
         return Ok(albums);
     }
+    
+    
+    // ─── Playlists ──────────────────────────────────────────────────────────
+
+    [HttpPost("playlists")]
+    public async Task<IActionResult> LikePlaylist([FromBody] LikePlaylistRequestDto dto)
+    {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { Error = "Streaming requires authentication." });
+
+        var result = await _favoritesService.AddPlaylistToFavoritesAsync(userId, dto.PlaylistId);
+
+        if (!result)
+            return BadRequest(new { message = "Не вдалося додати плейлист в обране. Можливо, його немає, він приватний або вже лайкнутий." });
+
+        return Ok(new { message = "Плейлист додано в обране" });
+    }
+
+    [HttpDelete("playlists/{playlistId:guid}")]
+    public async Task<IActionResult> UnlikePlaylist(Guid playlistId)
+    {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { Error = "Streaming requires authentication." });
+
+        var result = await _favoritesService.RemovePlaylistFromFavoritesAsync(userId, playlistId);
+
+        if (!result)
+            return NotFound(new { message = "Плейлист не знайдено в обраному" });
+
+        return Ok(new { message = "Плейлист видалено з обраного" });
+    }
+
+    [HttpGet("playlists")]
+    public async Task<IActionResult> GetMyFavoritePlaylists(CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { Error = "Streaming requires authentication." });
+
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        var playlists = await _favoritesService.GetUserFavoritePlaylistsAsync(userId, baseUrl, cancellationToken);
+        return Ok(playlists);
+    }
 
     // ─── helpers ─────────────────────────────────────────────────────────────
 

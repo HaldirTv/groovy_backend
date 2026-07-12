@@ -56,6 +56,8 @@ public class Track
     public Guid UserId { get; set; } // Для треков Jamendo можно зашить Guid системного администратора/бота
 
     public long PlayCount { get; set; } = 0;
+    public bool IsDeleted { get; set; } = false;
+    public DateTime? DeletedAt { get; set; }
     
     [NotMapped]
     public string? CoverImageUrl

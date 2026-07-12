@@ -13,18 +13,21 @@ public class JamendoController : ControllerBase
     private readonly MusicDbContext _context;
     private readonly HttpClient _httpClient;
 
-    private const string JamendoClientId = "16efb5ab";
+    private readonly IConfiguration _configuration;
 
+    private readonly string JamendoClientId;
     // Верхняя граница случайного offset внутри каталога Jamendo —
     // просто "глубина", из которой берём случайный кусок, не реальный размер базы.
     private const int MaxOffsetRange = 5000;
 
-    public JamendoController(MusicDbContext context, HttpClient httpClient)
+    public JamendoController(MusicDbContext context, HttpClient httpClient,IConfiguration configuration)
     {
         _context = context;
         _httpClient = httpClient;
+        _configuration = configuration;
+        JamendoClientId = _configuration.GetSection("JamendoApi:ClientId").Value ?? "";
     }
-
+   
     [HttpPost("seed-popular")]
     public async Task<IActionResult> SeedPopular([FromQuery] int limit = 10)
     {

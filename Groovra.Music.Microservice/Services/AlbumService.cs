@@ -3,6 +3,8 @@ using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Model;
 using Groovra.Shared.ServiceResult;
 using Groovra.Music.Microservice.Result;
+using Groovra.Shared.Constants;
+using Groovra.Shared.Extensions;
 
 namespace Groovra.Music.Microservice.Services;
 
@@ -306,79 +308,117 @@ public class AlbumService
         Guid albumId,
         CancellationToken cancellationToken = default)
     {
+        // 1. Находим сам альбом
         var album = await _context.Albums.FirstOrDefaultAsync(a => a.Id == albumId && !a.IsDeleted, cancellationToken);
-        if (album is null) return ServiceResult<bool>.Fail("Альбом не знайдено.");
+        if (album is null) 
+            return ServiceResult<bool>.Fail("Альбом не знайдено.");
 
-        await _context.Tracks
-            .Where(t => t.AlbumId == albumId)
-            .ExecuteUpdateAsync(
-                s => s.SetProperty(t => t.AlbumId, t => (Guid?)null)
-                      .SetProperty(t => t.AlbumTitle, t => null), // Сбрасываем и имя альбома
-                cancellationToken);
+        var now = DateTime.UtcNow;
 
+        // 2. Мягко удаляем ТОЛЬКО альбом. 
+        // Треки вообще НЕ ТРОГАЕМ. Их AlbumId остается на месте!
         album.IsDeleted = true;
-        album.DeletedAt = DateTime.UtcNow;
-        album.UpdatedAt = DateTime.UtcNow;
+        album.DeletedAt = now;
+        album.UpdatedAt = now;
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Album soft-deleted. Id={Id}", albumId);
+        _logger.LogInformation("Album soft-deleted. Tracks preserved. Id={Id}", albumId);
         return ServiceResult<bool>.Ok(true);
     }
+    
+    
+    
+    public async Task<IReadOnlyList<AlbumListItemDto>> GetDeletedAlbumsAsync(Guid userId, string baseUrl, CancellationToken cancellationToken = default)
+    {
+        var albums = await _context.Albums
+            .IgnoreQueryFilters()
+            .Where(a => a.IsDeleted && a.UserId == userId)
+            .OrderByDescending(a => a.DeletedAt)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
 
+        return albums.Select(a => new AlbumListItemDto
+        {
+            Id                   = a.Id,
+            Title                = a.Title,
+            ArtistName           = a.ArtistName,
+            CoverImageUrl        = BuildCoverUrl(a, baseUrl),
+            TrackCount           = a.TrackCount,
+            TotalDurationSeconds = a.TotalDurationSeconds,
+            ReleaseDate          = a.ReleaseDate,
+            IsLiked              = false
+        }).ToList();
+    }
+    
+    public async Task<ServiceResult<bool>> RestoreAlbumAsync(Guid albumId, Guid currentUserId, string userRoles, CancellationToken cancellationToken = default)
+    {
+        var album = await _context.Albums
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(a => a.Id == albumId && a.IsDeleted, cancellationToken);
+
+        if (album is null) 
+            return ServiceResult<bool>.Fail("Видалений альбом не знайдено.");
+
+        if (album.UserId != currentUserId && !userRoles.HasRole(AppRoles.Admin))
+            return ServiceResult<bool>.Fail("Немає прав для відновлення цього альбому.");
+
+        album.IsDeleted = false;
+        album.DeletedAt = null;
+        album.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return ServiceResult<bool>.Ok(true);
+    }
+    
+    
+    
     // ─── GenerateRandomAlbums (bulk seed для тестових даних) ───────────────────────
     public async Task<ServiceResult<List<AlbumDto>>> GenerateRandomAlbumsAsync(
-        Guid ownerUserId,
-        string artistName,
-        int albumsCount,
-        int tracksPerAlbum,
-        string? genre,
-        string baseUrl,
-        bool onlySystemTracks = true,
+        Guid ownerUserId, string artistName, int albumsCount, int tracksPerAlbum, 
+        string? genre, string baseUrl, bool onlySystemTracks = true, 
         CancellationToken cancellationToken = default)
     {
         var createdAlbums = new List<AlbumDto>();
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
 
         for (int i = 0; i < albumsCount; i++)
         {
             var album = new Album
             {
-                Id                   = Guid.NewGuid(),
-                UserId               = ownerUserId,
-                Title                = $"Generated Album {DateTime.UtcNow:yyyyMMddHHmmss}-{i + 1}",
-                ArtistName           = artistName.Trim(),
-                TrackCount           = 0,
+                Id = Guid.NewGuid(),
+                UserId = ownerUserId,
+                Title = $"Generated Album {DateTime.UtcNow:yyyyMMddHHmmss}-{i + 1}",
+                ArtistName = artistName.Trim(),
+                TrackCount = 0,
                 TotalDurationSeconds = 0,
-                IsDeleted            = false,
-                CreatedAt            = DateTime.UtcNow,
-                UpdatedAt            = DateTime.UtcNow,
+                IsDeleted = false,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
             };
 
+            // Добавляем альбом в контекст, но НЕ сохраняем ещё
             _context.Albums.Add(album);
-            await _context.SaveChangesAsync(cancellationToken);
 
             var fillResult = await FillAlbumWithRandomTracksAsync(
                 album.Id, tracksPerAlbum, genre, baseUrl, onlySystemTracks, cancellationToken);
 
             if (!fillResult.Success)
             {
-                _logger.LogWarning(
-                    "GenerateRandomAlbums: не вдалося наповнити альбом {AlbumId} треками. Reason={Reason}",
-                    album.Id, fillResult.ErrorMessage);
-
-                _context.Albums.Remove(album);
-                await _context.SaveChangesAsync(cancellationToken);
-                break; 
+                _logger.LogWarning("Не удалось заполнить альбом {AlbumId}. Причина: {Reason}", album.Id, fillResult.ErrorMessage);
+                // Откатываем транзакцию – все изменения в этом цикле отменятся
+                await transaction.RollbackAsync(cancellationToken);
+                return ServiceResult<List<AlbumDto>>.Fail($"Не удалось создать альбом: {fillResult.ErrorMessage}");
             }
 
             createdAlbums.Add(fillResult.Data!);
         }
 
-        if (!createdAlbums.Any())
-            return ServiceResult<List<AlbumDto>>.Fail("Не вдалося згенерувати жодного альбому — недостатньо вільних треків у базі (з урахуванням фільтрів).");
+        // Сохраняем все альбомы и треки одной транзакцией
+        await _context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
-        _logger.LogInformation("Generated {Count} random albums for user {UserId}", createdAlbums.Count, ownerUserId);
-
+        _logger.LogInformation("Сгенерировано {Count} альбомов", createdAlbums.Count);
         return ServiceResult<List<AlbumDto>>.Ok(createdAlbums);
     }
 
