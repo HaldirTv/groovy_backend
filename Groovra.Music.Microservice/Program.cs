@@ -1,21 +1,32 @@
+using Groovra.Messaging.Extensions;
+using Groovra.Music.Microservice.DTOs;
+using Groovra.Music.Microservice.Grpc;
 using Groovra.Music.Microservice.Model;
 using Groovra.Music.Microservice.Services;
 using Groovra.Shared.Grpc;
 using Grpc.Net.Client;
+using Hangfire; // Добавлено
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    options.ModelBinderProviders.Insert(0, new Groovra.Music.Microservice.Binders.GuidListModelBinderProvider());
+});
+
+builder.Services.AddMessagingBus(builder.Configuration);
+
 builder.Services.AddOpenApi(options =>
 {
     options.AddDocumentTransformer((document, context, cancellationToken) =>
     {
-        // Указываем относительный корень "/", чтобы Scalar автоматически
-        // подставлял хост Gateway (https://localhost:7005).
         document.Servers = new List<OpenApiServer>
         {
             new OpenApiServer { Url = "/" } 
@@ -28,24 +39,48 @@ builder.Services.AddOpenApi(options =>
 builder.Services.AddDbContext<MusicDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+// === НАСТРОЙКА HANGFIRE (ЭТОГО НЕ ХВАТАЛО) ===
+builder.Services.AddHangfire(configuration => configuration
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddHangfireServer();
+
+builder.Services.AddHttpClient();
+
 // Register services (scoped per-request)
 builder.Services.AddScoped<UploadService>();
 builder.Services.AddScoped<MusicService>();
+builder.Services.AddScoped<FavoritesService>();
+builder.Services.AddScoped<PlaylistService>();
+builder.Services.AddScoped<AlbumService>();
+builder.Services.AddScoped<StatsService>();
+builder.Services.AddScoped<GarbageCollectorService>(); // Добавлено
 
 builder.Services.AddGrpcClient<UserNameGrpcService.UserNameGrpcServiceClient>(o =>
 {
-    // Возьми этот URL из appsettings.json, либо захардкодь для локальной разработки
     o.Address = new Uri(builder.Configuration["AuthGrpcUrl"] ?? "https://localhost:7008"); 
     
 }).ConfigurePrimaryHttpMessageHandler(() =>
 {
     var handler = new HttpClientHandler();
-    // Отключаем паранойю по поводу локальных сертификатов
     handler.ServerCertificateCustomValidationCallback = 
         HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
     return handler;
 });
+builder.Services.AddGrpc();
 
+// === РЕГИСТРАЦИЯ REDIS ===
+var redisConnectionString = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
+
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp => 
+{
+    var options = ConfigurationOptions.Parse(redisConnectionString);
+    options.AbortOnConnectFail = false; 
+    return ConnectionMultiplexer.Connect(options);
+});
 
 // ── App ───────────────────────────────────────────────────────────────────────
 var app = builder.Build();
@@ -57,26 +92,18 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseAuthorization();
-app.MapControllers();
 
-// Serve stored media files as static content (for local dev).
-// In production, replace with a CDN or dedicated file-serving middleware.
-// Находим правильный абсолютный путь
+// ── Настройка и раздача static файлов ──────────────────────────────────────────
 var basePathConfig = builder.Configuration["MediaStorage:BasePath"];
 string mediaPath = string.IsNullOrWhiteSpace(basePathConfig)
     ? Path.Combine(Directory.GetCurrentDirectory(), "MediaStorage")
     : Path.GetFullPath(basePathConfig);
 
-// Сами создаем папку MediaStorage в проекте, если её еще нет, чтобы не было ошибок
 if (!Directory.Exists(mediaPath))
 {
     Directory.CreateDirectory(mediaPath);
 }
 
-// Раздаём ТОЛЬКО обложки (covers/) как статику.
-// Аудиофайлы (audio/) намеренно НЕ включены: они отдаются через
-// streaming endpoint /music/tracks/{id}/stream с поддержкой HTTP Range.
 var coversPath = Path.Combine(mediaPath, "covers");
 if (!Directory.Exists(coversPath))
     Directory.CreateDirectory(coversPath);
@@ -86,6 +113,33 @@ app.UseStaticFiles(new StaticFileOptions
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(coversPath),
     RequestPath  = "/music/files/covers"
 });
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(Path.Combine(mediaPath, "albumcovers")),
+    RequestPath = "/music/files/albumcovers"
+});
 
+// ───────────────────────────────────────────────────────────────────────────────
+
+app.UseAuthorization();
+app.MapControllers();
+app.MapGrpcService<TrackInfoGrpcServer>();
+
+// Пайплайн Hangfire
+if (app.Environment.IsDevelopment()) 
+{
+    app.UseHangfireDashboard(); 
+}
+
+// Регистрация джоба
+using (var scope = app.Services.CreateScope())
+{
+    var recurringJobManager = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+    
+    recurringJobManager.AddOrUpdate<GarbageCollectorService>(
+        "groovra-music-garbage-cleanup",
+        service => service.CleanUpGarbageAsync(CancellationToken.None),
+        Cron.Daily(3)); 
+}
 
 app.Run();

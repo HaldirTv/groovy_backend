@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -21,12 +22,14 @@ builder.Services.AddReverseProxy()
             transformContext.ProxyRequest.Headers.Remove("X-User-Id");
             transformContext.ProxyRequest.Headers.Remove("X-User-Name");
             transformContext.ProxyRequest.Headers.Remove("X-User-Role");
-
+            
+           
             if (user.Identity?.IsAuthenticated == true)
             {
                 var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier) ?? user.FindFirst("sub");
                 var userNameClaim = user.FindFirst(ClaimTypes.Name) ?? user.FindFirst("name");
-
+                
+                var encodedName = WebUtility.UrlEncode(userNameClaim?.Value ?? "");
                 if (userIdClaim != null && !string.IsNullOrEmpty(userIdClaim.Value))
                 {
                     
@@ -42,7 +45,7 @@ builder.Services.AddReverseProxy()
 
           
                     transformContext.ProxyRequest.Headers.Add("X-User-Id", userIdClaim.Value);
-                    transformContext.ProxyRequest.Headers.Add("X-User-Name", userNameClaim?.Value ?? "");
+                    transformContext.ProxyRequest.Headers.Add("X-User-Name", encodedName);
                     transformContext.ProxyRequest.Headers.Add("X-User-Role", rolesValue);
                 }
             }
@@ -118,7 +121,8 @@ app.MapScalarApiReference("/scalar/v1", options =>
     // Мы говорим Scalar-у тянуть JSON по этому адресу,
     // а YARP перехватит этот запрос и отправит его в Auth-микросервис.
     options.AddDocument("auth", "Auth Service", "/docs/auth/openapi.json", isDefault: true)
-        .AddDocument("music","Music Service","docs/music/openapi.json");
+        .AddDocument("music", "Music Service", "docs/music/openapi.json")
+        .AddDocument("history", "History Service", "/docs/history/openapi.json");
 });
 
 // === 6. ЗАПУСК ШЛЮЗА YARP ===

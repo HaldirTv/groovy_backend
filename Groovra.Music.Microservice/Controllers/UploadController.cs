@@ -1,5 +1,6 @@
 using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Services;
+using Groovra.Shared.Extensions;
 using Groovra.Shared.Grpc; // Подключаем пространство имен gRPC
 using Microsoft.AspNetCore.Mvc;
 
@@ -48,7 +49,7 @@ public class UploadController : ControllerBase
         // ── 2. Читаем заголовки шлюза (кто делает запрос) ──────────────────
         var userIdString = Request.Headers["X-User-Id"].ToString();
         var userRole = Request.Headers["X-User-Role"].ToString();
-        var userName = Request.Headers["X-User-Name"].ToString();
+        var userName = HttpContext.GetUserName();
         if (!Guid.TryParse(userIdString, out Guid currentUserId))
         {
             return Unauthorized(new { Error = "User ID missing or invalid in Gateway headers." });
@@ -79,11 +80,11 @@ public class UploadController : ControllerBase
 
                 finalArtistName = grpcResponse.Username; // Взяли реальное имя из базы Auth
             }
-            catch (Grpc.Core.RpcException ex) when (ex.StatusCode == Grpc.Core.StatusCode.NotFound)
+            catch (global::Grpc.Core.RpcException ex) when (ex.StatusCode == global::Grpc.Core.StatusCode.NotFound)
             {
                 return BadRequest(new { Error = $"Target artist with ID {finalOwnerId} not found in Auth database." });
             }
-            catch (Grpc.Core.RpcException ex)
+            catch (global::Grpc.Core.RpcException ex)
             {
                 _logger.LogError(ex, "gRPC call failed while Admin was uploading track.");
                 return StatusCode(StatusCodes.Status500InternalServerError, new { Error = "Auth service unavailable." });
@@ -114,7 +115,7 @@ public class UploadController : ControllerBase
                 TrackId = track.Id,
                 Title = track.Title,
                 ArtistName = track.ArtistName, // Вернется уже проверенное имя
-                Album = track.Album,
+                Album = track.AlbumTitle ?? track.Album?.Title,
                 Genre = track.Genre,
                 DurationSeconds = track.DurationSeconds,
                 FileSizeBytes = track.FileSizeBytes,
