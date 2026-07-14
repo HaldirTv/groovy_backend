@@ -307,10 +307,28 @@ public async Task<IActionResult> SeedAlbumsRandom([FromQuery] int count = 10, [F
 
             return Ok(new { Message = $"Успешно добавлено треков: {addedCount}" });
         }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
+            {
+                var realReason = ex.InnerException?.Message ?? ex.Message;
+                return StatusCode(500, new
+                {
+                    Error = "Ошибка при сохранении в БД (DbUpdateException).",
+                    Reason = realReason
+                });
+            }
+            catch (JsonException ex)
+            {
+                return StatusCode(500, new
+                {
+                    Error = "Не удалось распарсить ответ Jamendo (JsonException).",
+                    Reason = ex.Message
+                });
+            }
         catch (Exception ex)
         {
             return StatusCode(500, $"Внутренняя ошибка: {ex.Message}");
         }
+        
     }
 }
 
