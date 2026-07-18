@@ -22,4 +22,5 @@ RUN dotnet publish "./Groovra.Music.Microservice.csproj" -c $BUILD_CONFIGURATION
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+RUN mkdir -p /app/media/audio /app/media/covers /app/media/albumcovers
 ENTRYPOINT ["dotnet", "Groovra.Music.Microservice.dll"]
