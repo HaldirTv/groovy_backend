@@ -136,6 +136,11 @@ public class ReglogService
         }
     
         _context.Users.Add(user);
+        user.Profile = new Profile
+        {
+            UserId = user.Id,
+            DisplayName = user.Username
+        };
         await _context.SaveChangesAsync(token);
         
         await _cache.RemoveAsync(pendingKey, token);
@@ -186,6 +191,12 @@ public class ReglogService
         {
             user.Roles.Add(listenerRole);
         }
+
+        user.Profile = new Profile
+        {
+            UserId = user.Id,
+            DisplayName = user.Username
+        };
 
         _context.Users.Add(user);
         await _context.SaveChangesAsync(token);
