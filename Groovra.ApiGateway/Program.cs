@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using Yarp.ReverseProxy.Transforms;
@@ -134,6 +135,16 @@ builder.Services.AddAuthentication(options =>
 var app = builder.Build();
 
 // === 4. НАСТРОЙКА КОНВЕЙЕРА ЗАПРОСОВ ===
+// Шлюз стоит за Caddy (reverse proxy в docker-сети) — без этого RemoteIpAddress
+// всегда будет IP-адресом Caddy, и IpBasedLimiter схлопнется в общий лимит на всех.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+forwardedHeadersOptions.KnownIPNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
+
 app.UseRouting();
 app.UseCors();
 app.UseRateLimiter();
