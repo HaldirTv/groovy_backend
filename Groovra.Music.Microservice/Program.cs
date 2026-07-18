@@ -44,7 +44,13 @@ builder.Services.AddHangfire(configuration => configuration
     .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
     .UseSimpleAssemblyNameTypeSerializer()
     .UseRecommendedSerializerSettings()
-    .UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection")));
+    .UseSqlServerStorage(
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        new Hangfire.SqlServer.SqlServerStorageOptions
+        {
+            SchemaName = "dbo",                  // Принудительно используем стандартную схему dbo
+            PrepareSchemaIfNecessary = false     // Запрещаем Hangfire пытаться создавать/проверять таблицы (мы их уже создали вручную)
+        }));
 
 builder.Services.AddHangfireServer();
 

@@ -94,3 +94,6 @@ Desktop.ini
 
 # Логи общего назначения
 *.log
+# IDE agent configs
+.agents/
+scratch/
