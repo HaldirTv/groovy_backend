@@ -1,13 +1,37 @@
 using System.Net;
 using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using Yarp.ReverseProxy.Transforms;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRateLimiter(options =>
+{
+ 
+    options.AddPolicy("IpBasedLimiter", context =>
+    {
+       
+        var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
+        return RateLimitPartition.GetFixedWindowLimiter(remoteIp, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 100, // Сколько запросов разрешено
+            Window = TimeSpan.FromMinutes(1), // За какой промежуток времени
+            QueueLimit = 0 // Очередь для заблокированных запросов (0 — сразу отсекать)
+        });
+    });
+
+    // Что возвращать, если лимит превышен (обычно 429 Too Many Requests)
+    options.OnRejected = async (context, token) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.HttpContext.Response.ContentType = "application/json; charset=utf-8";
+        await context.HttpContext.Response.WriteAsync("{\"error\": \"Too many requests. Please try again later.\"}", token);
+    };
+});
 
 // === 1. РЕГИСТРАЦИЯ YARP ===
 builder.Services.AddReverseProxy()
@@ -58,7 +82,11 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:5178", "https://localhost:7005") // Добавили адрес Gateway!
+        
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
+                             ?? new[] { "http://localhost:5178" }; // дефолт, если ничего не передали
+
+        policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -106,8 +134,9 @@ builder.Services.AddAuthentication(options =>
 var app = builder.Build();
 
 // === 4. НАСТРОЙКА КОНВЕЙЕРА ЗАПРОСОВ ===
-
+app.UseRouting();
 app.UseCors();
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();

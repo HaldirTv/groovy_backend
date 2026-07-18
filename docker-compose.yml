@@ -38,6 +38,8 @@ services:
       - Email__Password=${MAIL_PASS}
       - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
       - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
+      - Cors__AllowedOrigins__0=http://localhost:5178
+      - Cors__AllowedOrigins__1=https://groovra-frontend.vercel.app/
     depends_on:
       - rabbitmq
       - redis
@@ -100,6 +102,7 @@ services:
       - Jwt__Key=${JWT_SECRET_KEY}
       - Jwt__Issuer=groovra.local
       - Jwt__Audience=groovra.clients
+      # Обрати внимание на точное совпадение с именами кластеров из appsettings.json и порты :8080
       - ReverseProxy__Clusters__auth-cluster__Destinations__auth-destination__Address=http://auth-service:8080
       - ReverseProxy__Clusters__music-cluster__Destinations__music-destination__Address=http://music-service:8080
       - ReverseProxy__Clusters__history-cluster__Destinations__history-destination__Address=http://history-service:8080
