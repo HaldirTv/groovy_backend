@@ -80,7 +80,7 @@ public class LibraryService
             TrackId = track.Id,
             Title = track.Title,
             ArtistName = track.ArtistName,
-            Album = track.Album,
+            Album = track.AlbumTitle,
             Genre = track.Genre,
             DurationSeconds = track.DurationSeconds,
             FileSizeBytes = track.FileSizeBytes,

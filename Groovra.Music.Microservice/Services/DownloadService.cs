@@ -42,7 +42,7 @@ public class DownloadService
                     if (string.IsNullOrWhiteSpace(dto.AlbumName) || string.IsNullOrWhiteSpace(dto.ArtistName))
                         return (false, "AlbumName та ArtistName обов'язкові для альбому.");
                     var exists = await _db.Tracks.AnyAsync(
-                        t => t.Album == dto.AlbumName && t.ArtistName == dto.ArtistName, cancellationToken);
+                        t => t.AlbumTitle == dto.AlbumName && t.ArtistName == dto.ArtistName, cancellationToken);
                     if (!exists) return (false, "Альбом не знайдено.");
                     break;
                 }
@@ -148,7 +148,7 @@ public class DownloadService
                 case DownloadType.Album:
                     {
                         var albumTracks = await _db.Tracks
-                            .Where(t => t.Album == d.AlbumName && t.ArtistName == d.ArtistName)
+                            .Where(t => t.AlbumTitle == d.AlbumName && t.ArtistName == d.ArtistName)
                             .AsNoTracking()
                             .ToListAsync(cancellationToken);
                         if (albumTracks.Count == 0) continue;

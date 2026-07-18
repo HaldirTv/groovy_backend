@@ -74,6 +74,48 @@ namespace Groovra.Music.Microservice.Migrations
                     b.ToTable("Albums", "music");
                 });
 
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.Download", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AlbumName")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("ArtistName")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime>("DownloadedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Type", "ItemId")
+                        .IsUnique()
+                        .HasFilter("[ItemId] IS NOT NULL");
+
+                    b.HasIndex("UserId", "Type", "AlbumName", "ArtistName")
+                        .IsUnique()
+                        .HasFilter("[AlbumName] IS NOT NULL AND [ArtistName] IS NOT NULL");
+
+                    b.ToTable("Downloads", "music");
+                });
+
             modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoriteAlbum", b =>
                 {
                     b.Property<Guid>("UserId")

@@ -14,6 +14,7 @@ public class MusicDbContext : DbContext
     public DbSet<Album> Albums { get; set; }
     public DbSet<FavoriteAlbum> FavoriteAlbums { get; set; }
     public DbSet<FavoritePlaylist> FavoritePlaylists { get; set; }
+    public DbSet<Download> Downloads { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
