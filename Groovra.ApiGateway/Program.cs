@@ -83,13 +83,10 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.SetIsOriginAllowed(origin => 
-            {
-                var host = new Uri(origin).Host;
-                return host == "localhost" || 
-                       host == "127.0.0.1" || 
-                       host.EndsWith(".vercel.app");
-            })
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                             ?? new[] { "http://localhost:5178" }; // дефолт, если ничего не передали
+
+        policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
