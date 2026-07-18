@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Claims;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -86,7 +87,15 @@ builder.Services.AddCors(options =>
         var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
                              ?? new[] { "http://localhost:5178" }; // дефолт, если ничего не передали
 
-        policy.WithOrigins(allowedOrigins)
+        // Vercel даёт каждому preview-деплою уникальный URL вида
+        // groovra-frontend-9wtp-<hash>-berserklegends-projects.vercel.app —
+        // ловим их regex'ом, чтобы не редактировать AllowedOrigins после каждого деплоя.
+        var vercelPreviewPattern = new Regex(
+            @"^https://groovra-frontend-9wtp-[a-z0-9]+-berserklegends-projects\.vercel\.app$",
+            RegexOptions.IgnoreCase);
+
+        policy.SetIsOriginAllowed(origin =>
+                allowedOrigins.Contains(origin) || vercelPreviewPattern.IsMatch(origin))
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
