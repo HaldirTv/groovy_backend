@@ -58,7 +58,7 @@ services:
       - RabbitMQ__Host=rabbitmq
       - RabbitMQ__Username=guest
       - RabbitMQ__Password=guest
-      - AuthGrpcUrl=http://auth-service:8080
+      - AuthGrpcUrl=http://auth-service:8081
       - JamendoApi__BaseUrl=https://api.jamendo.com/v3.0
       - JamendoApi__ClientId=16efb5ab
       - MediaStorage__BasePath=/app/media
@@ -82,7 +82,7 @@ services:
       - RabbitMQ__Host=rabbitmq
       - RabbitMQ__Username=guest
       - RabbitMQ__Password=guest
-      - MusicGrpcUrl=http://music-service:8080
+      - MusicGrpcUrl=http://music-service:8081
     depends_on:
       - rabbitmq
       - music-service

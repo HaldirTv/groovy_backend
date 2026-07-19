@@ -18,14 +18,15 @@ AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport
 
 var builder = WebApplication.CreateBuilder(args);
 
-// This service also acts as a gRPC server (TrackInfoGrpcServer) on the same plain-HTTP port as the REST API.
-// Kestrel's default endpoint (from ASPNETCORE_URLS alone, no TLS) only accepts HTTP/1.1 and rejects h2c
-// with error HTTP_1_1_REQUIRED unless HTTP/2 is explicitly allowed here.
+// This service also acts as a gRPC server (TrackInfoGrpcServer). Without TLS, Kestrel can't
+// negotiate HTTP/1.1 vs HTTP/2 on one endpoint (no ALPN) — it silently falls back to HTTP/1.1
+// and rejects h2c with HTTP_1_1_REQUIRED. So gRPC gets its own HTTP/2-only port; REST (port 8080
+// from ASPNETCORE_URLS) stays HTTP/1.1 as before.
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ConfigureEndpointDefaults(listenOptions =>
+    options.ListenAnyIP(8081, listenOptions =>
     {
-        listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
+        listenOptions.Protocols = HttpProtocols.Http2;
     });
 });
 
