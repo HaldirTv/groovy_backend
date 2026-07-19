@@ -14,8 +14,9 @@ public class Track
     [Required, MaxLength(256)]
     public string ArtistName { get; set; } = string.Empty;
 
-    [MaxLength(256)]
-    public string? Album { get; set; }
+    public string? AlbumTitle { get; set; }   
+    public Guid? AlbumId { get; set; }
+    public Album? Album { get; set; } 
 
     [MaxLength(128)]
     public string? Genre { get; set; }
@@ -55,6 +56,8 @@ public class Track
     public Guid UserId { get; set; } // Для треков Jamendo можно зашить Guid системного администратора/бота
 
     public long PlayCount { get; set; } = 0;
+    public bool IsDeleted { get; set; } = false;
+    public DateTime? DeletedAt { get; set; }
     
     [NotMapped]
     public string? CoverImageUrl

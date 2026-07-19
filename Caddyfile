@@ -1,0 +1,3 @@
+groovra-backend.duckdns.org {
+    reverse_proxy gateway:8080
+}

@@ -115,7 +115,7 @@ public class UploadController : ControllerBase
                 TrackId = track.Id,
                 Title = track.Title,
                 ArtistName = track.ArtistName, // Вернется уже проверенное имя
-                Album = track.Album,
+                Album = track.AlbumTitle ?? track.Album?.Title,
                 Genre = track.Genre,
                 DurationSeconds = track.DurationSeconds,
                 FileSizeBytes = track.FileSizeBytes,

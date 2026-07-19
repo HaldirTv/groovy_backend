@@ -8,6 +8,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 
+// gRPC client requires this to call the Music service over plain HTTP/2 (h2c) in Docker — without it every call throws.
+AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Контроллеры и OpenApi документация

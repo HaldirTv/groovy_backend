@@ -12,10 +12,12 @@ namespace Groovra.Music.Microservice.Controllers;
 public class PlaylistsController : ControllerBase
 {
     private readonly PlaylistService _playlistService;
+    private readonly FavoritesService _favoritesService;
 
-    public PlaylistsController(PlaylistService playlistService)
+    public PlaylistsController(PlaylistService playlistService, FavoritesService favoritesService)
     {
         _playlistService = playlistService;
+        _favoritesService = favoritesService;
     }
 
     // POST music/playlists
@@ -54,7 +56,17 @@ public class PlaylistsController : ControllerBase
 
         var result = await _playlistService.GetUserPlaylistsAsync(target, includePrivate, cancellationToken);
 
-        return Ok(result.Data);
+        if (!result.Success)
+            return BadRequest(new { message = result.ErrorMessage });
+
+        var likedIds = await _favoritesService.GetLikedPlaylistIdsAsync(requesterId, cancellationToken);
+        var playlists = result.Data.Select(p =>
+        {
+            p.IsLiked = likedIds.Contains(p.Id);
+            return p;
+        }).ToList();
+
+        return Ok(playlists);
     }
 
     // GET music/playlists/{id}
@@ -70,9 +82,13 @@ public class PlaylistsController : ControllerBase
 
         // ПРОВЕРКА ДОСТУПА В КОНТРОЛЛЕРЕ:
         if (playlist.IsPrivate && playlist.UserId != requesterId && !HttpContext.UserIsInRole(AppRoles.Admin))
-            return NotFound(new { message = "Плейлист не знайдено." }); // Скрываем под 404, а не 403, чтобы не выдавать существование
+            return NotFound(new { message = "Плейлист не знайдено." }); // Скрываем под 404, а не 403, чтобы не выдавать існування
 
-        var result = await _playlistService.GetPlaylistByIdAsync(id, GetBaseUrl(), cancellationToken);
+        // Проверяем, лайкнут ли плейлист текущим юзером
+        var isLiked = requesterId != Guid.Empty &&
+            (await _favoritesService.GetLikedPlaylistIdsAsync(requesterId, cancellationToken)).Contains(id);
+
+        var result = await _playlistService.GetPlaylistByIdAsync(id, GetBaseUrl(), isLiked, cancellationToken);
 
         if (!result.Success)
             return NotFound(new { message = result.ErrorMessage });
@@ -160,7 +176,36 @@ public class PlaylistsController : ControllerBase
 
         return Ok(new { message = "Трек видалено з плейлиста." });
     }
+    
+    // GET music/playlists/deleted
+    [HttpGet("deleted")]
+    public async Task<IActionResult> GetDeletedPlaylists(CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var currentUserId))
+            return Unauthorized(new { message = "Потрібна авторизація." });
 
+        var result = await _playlistService.GetDeletedPlaylistsAsync(currentUserId, GetBaseUrl(), cancellationToken);
+        return Ok(result.Data);
+    }
+
+// POST music/playlists/{id}/restore
+    [HttpPost("{id:guid}/restore")]
+    public async Task<IActionResult> RestorePlaylist(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var currentUserId))
+            return Unauthorized(new { message = "Потрібна авторизація." });
+
+        var userRole = Request.Headers["X-User-Role"].ToString();
+
+        var result = await _playlistService.RestorePlaylistAsync(id, currentUserId, userRole, cancellationToken);
+        if (!result.Success)
+            return BadRequest(new { message = result.ErrorMessage });
+
+        return Ok(new { message = "Плейлист успішно відновлено." });
+    }
+
+    
+    
     // PUT music/playlists/{id}/tracks/reorder
     [HttpPut("{id:guid}/tracks/reorder")]
     public async Task<IActionResult> ReorderTracks(
@@ -209,6 +254,9 @@ public class PlaylistsController : ControllerBase
 
         return Ok(new { message = "Плейлист видалено." });
     }
+    
+    
+    
 
     // ─── helpers ─────────────────────────────────────────────────────────────
 

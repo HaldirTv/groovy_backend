@@ -1,13 +1,39 @@
 using System.Net;
 using System.Security.Claims;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using Yarp.ReverseProxy.Transforms;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRateLimiter(options =>
+{
+ 
+    options.AddPolicy("IpBasedLimiter", context =>
+    {
+       
+        var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
+        return RateLimitPartition.GetFixedWindowLimiter(remoteIp, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 100, // Сколько запросов разрешено
+            Window = TimeSpan.FromMinutes(1), // За какой промежуток времени
+            QueueLimit = 0 // Очередь для заблокированных запросов (0 — сразу отсекать)
+        });
+    });
+
+    // Что возвращать, если лимит превышен (обычно 429 Too Many Requests)
+    options.OnRejected = async (context, token) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.HttpContext.Response.ContentType = "application/json; charset=utf-8";
+        await context.HttpContext.Response.WriteAsync("{\"error\": \"Too many requests. Please try again later.\"}", token);
+    };
+});
 
 // === 1. РЕГИСТРАЦИЯ YARP ===
 builder.Services.AddReverseProxy()
@@ -58,7 +84,18 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:5178", "https://localhost:7005") // Добавили адрес Gateway!
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                             ?? new[] { "http://localhost:5178" }; // дефолт, если ничего не передали
+
+        // Vercel даёт каждому preview-деплою уникальный URL вида
+        // groovra-frontend-9wtp-<hash>-berserklegends-projects.vercel.app —
+        // ловим их regex'ом, чтобы не редактировать AllowedOrigins после каждого деплоя.
+        var vercelPreviewPattern = new Regex(
+            @"^https://groovra-frontend-9wtp-[a-z0-9]+-berserklegends-projects\.vercel\.app$",
+            RegexOptions.IgnoreCase);
+
+        policy.SetIsOriginAllowed(origin =>
+                allowedOrigins.Contains(origin) || vercelPreviewPattern.IsMatch(origin))
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -106,8 +143,19 @@ builder.Services.AddAuthentication(options =>
 var app = builder.Build();
 
 // === 4. НАСТРОЙКА КОНВЕЙЕРА ЗАПРОСОВ ===
+// Шлюз стоит за Caddy (reverse proxy в docker-сети) — без этого RemoteIpAddress
+// всегда будет IP-адресом Caddy, и IpBasedLimiter схлопнется в общий лимит на всех.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+forwardedHeadersOptions.KnownIPNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
 
+app.UseRouting();
 app.UseCors();
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();

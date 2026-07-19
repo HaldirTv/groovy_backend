@@ -13,6 +13,8 @@ public class FavoritesService
         _context = context;
     }
 
+    // ─── Tracks ─────────────────────────────────────────────────────────────
+
     public async Task<bool> AddToFavoritesAsync(Guid userId, Guid trackId)
     {
         var trackExists = await _context.Tracks.AnyAsync(t => t.Id == trackId);
@@ -70,6 +72,155 @@ public class FavoritesService
         return ids.ToHashSet();
     }
 
+    // ─── Albums ─────────────────────────────────────────────────────────────
+
+    public async Task<bool> AddAlbumToFavoritesAsync(Guid userId, Guid albumId)
+    {
+        var albumExists = await _context.Albums.AnyAsync(a => a.Id == albumId && !a.IsDeleted);
+        if (!albumExists) return false;
+
+        var alreadyExists = await _context.FavoriteAlbums
+            .AnyAsync(f => f.UserId == userId && f.AlbumId == albumId);
+        if (alreadyExists) return false;
+
+        _context.FavoriteAlbums.Add(new FavoriteAlbum
+        {
+            UserId  = userId,
+            AlbumId = albumId
+        });
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<bool> RemoveAlbumFromFavoritesAsync(Guid userId, Guid albumId)
+    {
+        var favorite = await _context.FavoriteAlbums
+            .FirstOrDefaultAsync(f => f.UserId == userId && f.AlbumId == albumId);
+
+        if (favorite == null) return false;
+
+        _context.FavoriteAlbums.Remove(favorite);
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    /// <summary>
+    /// Повертає улюблені альбоми юзера як AlbumListItemDto з повними URL для обкладинки.
+    /// </summary>
+    public async Task<IEnumerable<AlbumListItemDto>> GetUserFavoriteAlbumsAsync(Guid userId, string baseUrl)
+    {
+        var albums = await _context.FavoriteAlbums
+            .Where(f => f.UserId == userId && ! f.Album.IsDeleted)
+            .Include(f => f.Album)
+            .Select(f => f.Album!)
+            .AsNoTracking()
+            .ToListAsync();
+
+        return albums.Select(a => MapAlbumToListItemDto(a, baseUrl, isLiked: true));
+    }     
+
+    public async Task<HashSet<Guid>> GetLikedAlbumIdsAsync(
+        Guid userId, CancellationToken token = default)
+    {
+        var ids = await _context.FavoriteAlbums
+            .Where(f => f.UserId == userId && !f.Album.IsDeleted)
+            .Select(f => f.AlbumId)
+            .ToListAsync(token);
+
+        return ids.ToHashSet();
+    }
+    
+    
+    // ─── Playlists ──────────────────────────────────────────────────────────
+
+    public async Task<bool> AddPlaylistToFavoritesAsync(Guid userId, Guid playlistId)
+    {
+        // Проверяем, что плейлист существует, не удален и является публичным
+        var playlistExists = await _context.Playlists
+            .AnyAsync(p => p.Id == playlistId && !p.IsDeleted && !p.IsPrivate);
+        if (!playlistExists) return false;
+
+        var alreadyExists = await _context.FavoritePlaylists
+            .AnyAsync(f => f.UserId == userId && f.PlaylistId == playlistId);
+        if (alreadyExists) return false;
+
+        _context.FavoritePlaylists.Add(new FavoritePlaylist
+        {
+            UserId     = userId,
+            PlaylistId = playlistId
+        });
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<bool> RemovePlaylistFromFavoritesAsync(Guid userId, Guid playlistId)
+    {
+        var favorite = await _context.FavoritePlaylists
+            .FirstOrDefaultAsync(f => f.UserId == userId && f.PlaylistId == playlistId);
+
+        if (favorite == null) return false;
+
+        _context.FavoritePlaylists.Remove(favorite);
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<IEnumerable<PlaylistListItemDto>> GetUserFavoritePlaylistsAsync(Guid userId, string baseUrl, CancellationToken token = default)
+    {
+        // Тянем только те, которые активны (не удалены)
+        var playlists = await _context.Playlists
+            .Where(p => _context.FavoritePlaylists.Any(f => f.UserId == userId && f.PlaylistId == p.Id) && !p.IsDeleted)
+            .Include(p => p.Tracks)
+            .ThenInclude(pt => pt.Track)
+            .AsNoTracking()
+            .ToListAsync(token);
+
+        return playlists.Select(p => MapPlaylistToListItemDto(p, baseUrl, isLiked: true));
+    }
+
+    public async Task<HashSet<Guid>> GetLikedPlaylistIdsAsync(Guid userId, CancellationToken token = default)
+    {
+        var ids = await _context.FavoritePlaylists
+            .Where(f => f.UserId == userId && !f.Playlist.IsDeleted)
+            .Select(f => f.PlaylistId)
+            .ToListAsync(token);
+
+        return ids.ToHashSet();
+    }
+    
+    // Вспомогательный маппер плейлиста с заполнением всех полей
+    private static PlaylistListItemDto MapPlaylistToListItemDto(Playlist playlist, string baseUrl, bool isLiked)
+    {
+        var collageCovers = playlist.Tracks
+            .OrderBy(pt => pt.Position)
+            .Take(4)
+            .Select(pt => pt.Track?.IsExternal == true
+                ? pt.Track.ExternalCoverUrl
+                : pt.Track?.CoverImageRelativePath != null
+                    ? $"{baseUrl}/music/files/{pt.Track.CoverImageRelativePath.Replace('\\', '/')}"
+                    : null)
+            .Where(url => url != null)
+            .Select(url => url!)
+            .ToList();
+
+        return new PlaylistListItemDto
+        {
+            Id                   = playlist.Id,
+            Title                = playlist.Title,
+            Description          = playlist.Description,
+            IsPrivate            = playlist.IsPrivate,
+            IsLiked              = isLiked,
+            Slug                 = playlist.Slug ?? string.Empty,
+            TrackCount           = playlist.TrackCount,
+            TotalDurationSeconds = playlist.TotalDurationSeconds,
+            CoverImageUrl        = playlist.CoverImageUrl,
+            UpdatedAt            = playlist.UpdatedAt,
+            CollageCovers        = collageCovers
+        };
+    }
+
     // ─── helpers ─────────────────────────────────────────────────────────────
 
     private static TrackDto MapToDto(Track track, string baseUrl)
@@ -98,7 +249,7 @@ public class FavoritesService
             TrackId         = track.Id,
             Title           = track.Title,
             ArtistName      = track.ArtistName,
-            Album           = track.Album,
+            Album           = track.AlbumTitle ?? track.Album?.Title,
             Genre           = track.Genre,
             DurationSeconds = track.DurationSeconds,
             FileSizeBytes   = track.FileSizeBytes,
@@ -108,6 +259,28 @@ public class FavoritesService
             UploadedAt      = track.UploadedAt,
             PlayCount       = track.PlayCount,
             IsLiked         = true
+        };
+    }
+
+    private static AlbumListItemDto MapAlbumToListItemDto(Album album, string baseUrl, bool isLiked)
+    {
+        string? coverUrl = null;
+        if (!string.IsNullOrWhiteSpace(album.CoverImageRelativePath))
+        {
+            var normalizedPath = album.CoverImageRelativePath.Replace('\\', '/').TrimStart('/');
+            coverUrl = $"{baseUrl}/music/files/{normalizedPath}";
+        }
+
+        return new AlbumListItemDto
+        {
+            Id                   = album.Id,
+            Title                = album.Title,
+            ArtistName           = album.ArtistName,
+            CoverImageUrl        = coverUrl,
+            TrackCount           = album.TrackCount,
+            TotalDurationSeconds = album.TotalDurationSeconds,
+            ReleaseDate          = album.ReleaseDate,
+            IsLiked              = isLiked,
         };
     }
 }

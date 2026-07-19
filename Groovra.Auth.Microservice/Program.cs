@@ -1,5 +1,6 @@
 using Groovra.Auth.Microservice.Data;
 using Groovra.Auth.Microservice.Services;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
 // 1. ИСПРАВЛЕННЫЙ USING:
 using Microsoft.OpenApi;
@@ -7,6 +8,24 @@ using Scalar.AspNetCore;
 using Microsoft.Extensions.FileProviders;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// This service also acts as a gRPC server (UserNameGrpcService). Calling ConfigureKestrel at all
+// makes Kestrel stop honoring ASPNETCORE_URLS/HTTP_PORTS for the default endpoint — it must be
+// declared explicitly here too, or REST traffic on 8080 silently stops being served.
+// gRPC needs its own HTTP/2-only port since Kestrel can't multiplex HTTP/1.1 and HTTP/2 on one
+// port without TLS (no ALPN) — without TLS it silently falls back to HTTP/1.1 and gRPC calls fail
+// with HTTP_1_1_REQUIRED.
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(8080, listenOptions =>
+    {
+        listenOptions.Protocols = HttpProtocols.Http1;
+    });
+    options.ListenAnyIP(8081, listenOptions =>
+    {
+        listenOptions.Protocols = HttpProtocols.Http2;
+    });
+});
 
 builder.Services.AddControllers();
 builder.Services.AddGrpc();

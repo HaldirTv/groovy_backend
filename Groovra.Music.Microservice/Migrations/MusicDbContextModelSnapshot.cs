@@ -23,46 +23,91 @@ namespace Groovra.Music.Microservice.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
-            modelBuilder.Entity("Groovra.Music.Microservice.Model.Download", b =>
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.Album", b =>
                 {
-                    b.Property<int>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("AlbumName")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("ArtistName")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<DateTime>("DownloadedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("ItemId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("Type")
+                    b.Property<string>("ArtistName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(450)");
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("CoverImageRelativePath")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateOnly?>("ReleaseDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<double>("TotalDurationSeconds")
+                        .HasColumnType("float");
+
+                    b.Property<int>("TrackCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "Type", "ItemId")
-                        .IsUnique()
-                        .HasFilter("[ItemId] IS NOT NULL");
+                    b.HasIndex("UserId");
 
-                    b.HasIndex("UserId", "Type", "AlbumName", "ArtistName")
-                        .IsUnique()
-                        .HasFilter("[AlbumName] IS NOT NULL AND [ArtistName] IS NOT NULL");
+                    b.ToTable("Albums", "music");
+                });
 
-                    b.ToTable("Downloads", "music");
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoriteAlbum", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AlbumId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("UserId", "AlbumId");
+
+                    b.HasIndex("AlbumId");
+
+                    b.ToTable("FavoriteAlbums", "music");
+                });
+
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoritePlaylist", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PlaylistId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("UserId", "PlaylistId");
+
+                    b.HasIndex("PlaylistId");
+
+                    b.ToTable("FavoritePlaylists", "music");
                 });
 
             modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoriteTrack", b =>
@@ -177,7 +222,10 @@ namespace Groovra.Music.Microservice.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("Album")
+                    b.Property<Guid?>("AlbumId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AlbumTitle")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
@@ -199,6 +247,9 @@ namespace Groovra.Music.Microservice.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
 
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<double>("DurationSeconds")
                         .HasColumnType("float");
 
@@ -216,6 +267,9 @@ namespace Groovra.Music.Microservice.Migrations
                     b.Property<string>("Genre")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsExternal")
                         .ValueGeneratedOnAdd()
@@ -240,7 +294,31 @@ namespace Groovra.Music.Microservice.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AlbumId");
+
                     b.ToTable("Tracks", "music");
+                });
+
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoriteAlbum", b =>
+                {
+                    b.HasOne("Groovra.Music.Microservice.Model.Album", "Album")
+                        .WithMany()
+                        .HasForeignKey("AlbumId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Album");
+                });
+
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoritePlaylist", b =>
+                {
+                    b.HasOne("Groovra.Music.Microservice.Model.Playlist", "Playlist")
+                        .WithMany()
+                        .HasForeignKey("PlaylistId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Playlist");
                 });
 
             modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoriteTrack", b =>
@@ -271,6 +349,21 @@ namespace Groovra.Music.Microservice.Migrations
                     b.Navigation("Playlist");
 
                     b.Navigation("Track");
+                });
+
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.Track", b =>
+                {
+                    b.HasOne("Groovra.Music.Microservice.Model.Album", "Album")
+                        .WithMany("Tracks")
+                        .HasForeignKey("AlbumId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Album");
+                });
+
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.Album", b =>
+                {
+                    b.Navigation("Tracks");
                 });
 
             modelBuilder.Entity("Groovra.Music.Microservice.Model.Playlist", b =>
