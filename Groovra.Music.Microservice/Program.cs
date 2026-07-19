@@ -12,6 +12,9 @@ using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 using StackExchange.Redis;
 
+// gRPC client requires this to call the Auth service over plain HTTP/2 (h2c) in Docker — without it every call throws.
+AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Services ──────────────────────────────────────────────────────────────────
