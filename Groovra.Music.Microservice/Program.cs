@@ -7,6 +7,7 @@ using Groovra.Shared.Grpc;
 using Grpc.Net.Client;
 using Hangfire; // Добавлено
 using MassTransit;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
@@ -16,6 +17,17 @@ using StackExchange.Redis;
 AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 
 var builder = WebApplication.CreateBuilder(args);
+
+// This service also acts as a gRPC server (TrackInfoGrpcServer) on the same plain-HTTP port as the REST API.
+// Kestrel's default endpoint (from ASPNETCORE_URLS alone, no TLS) only accepts HTTP/1.1 and rejects h2c
+// with error HTTP_1_1_REQUIRED unless HTTP/2 is explicitly allowed here.
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ConfigureEndpointDefaults(listenOptions =>
+    {
+        listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
+    });
+});
 
 // ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
