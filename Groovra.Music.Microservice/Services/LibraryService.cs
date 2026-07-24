@@ -14,9 +14,11 @@ public class LibraryService
         _db = db;
         _logger = logger;
     }
-    public async Task<IReadOnlyList<TrackDto>> GetUserLibraryAsync(
+    public async Task<(IReadOnlyList<TrackDto> Items, int TotalCount)> GetUserLibraryAsync(
         Guid userId,
         string baseUrl,
+        int pageNumber = 1,
+        int pageSize = 10,
         CancellationToken cancellationToken = default)
     {
         var favoriteTrackIds = await _db.FavoriteTracks
@@ -43,24 +45,28 @@ public class LibraryService
         if (allTrackIds.Count == 0)
         {
             _logger.LogInformation("GetUserLibrary: у юзера {UserId} пустая библиотека.", userId);
-            return Array.Empty<TrackDto>();
+            return (Array.Empty<TrackDto>(), 0);
         }
 
         var likedIds = favoriteTrackIds.ToHashSet();
 
-        var tracks = await _db.Tracks
+        var orderedTracks = await _db.Tracks
             .Where(t => allTrackIds.Contains(t.Id))
             .AsNoTracking()
+            .OrderBy(t => t.Title)
             .ToListAsync(cancellationToken);
 
         _logger.LogDebug(
             "GetUserLibrary: юзер {UserId}, треков в библиотеке — {Count}.",
-            userId, tracks.Count);
+            userId, orderedTracks.Count);
 
-        return tracks
-            .OrderBy(t => t.Title)
+        var page = orderedTracks
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
             .Select(t => MapToDto(t, baseUrl, likedIds.Contains(t.Id)))
             .ToList();
+
+        return (page, orderedTracks.Count);
     }
 
     private static TrackDto MapToDto(Track track, string baseUrl, bool isLiked)
@@ -82,6 +88,7 @@ public class LibraryService
             ArtistName = track.ArtistName,
             Album = track.AlbumTitle,
             Genre = track.Genre,
+            Mood = track.Mood,
             DurationSeconds = track.DurationSeconds,
             FileSizeBytes = track.FileSizeBytes,
             ContentType = track.ContentType,

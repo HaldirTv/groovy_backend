@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Groovra.Music.Microservice.Caching;
 using Groovra.Music.Microservice.Model;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -12,6 +13,7 @@ public class JamendoController : ControllerBase
 {
     private readonly MusicDbContext _context;
     private readonly HttpClient _httpClient;
+    private readonly ICacheService _cache;
 
     private readonly IConfiguration _configuration;
 
@@ -20,18 +22,28 @@ public class JamendoController : ControllerBase
     // просто "глубина", из которой берём случайный кусок, не реальный размер базы.
     private const int MaxOffsetRange = 5000;
 
-    public JamendoController(MusicDbContext context, HttpClient httpClient,IConfiguration configuration)
+    public JamendoController(MusicDbContext context, HttpClient httpClient, IConfiguration configuration, ICacheService cache)
     {
         _context = context;
         _httpClient = httpClient;
         _configuration = configuration;
+        _cache = cache;
         JamendoClientId = _configuration.GetSection("JamendoApi:ClientId").Value ?? "";
+    }
+
+    private async Task InvalidateTrackListCachesAsync()
+    {
+        await _cache.RemoveAsync(CacheKeys.Genres);
+        foreach (var pattern in CacheKeys.ListPatterns)
+        {
+            await _cache.RemoveByPatternAsync(pattern);
+        }
     }
    
     [HttpPost("seed-popular")]
     public async Task<IActionResult> SeedPopular([FromQuery] int limit = 10)
     {
-        var url = $"https://api.jamendo.com/v3.0/tracks/?client_id={JamendoClientId}&format=json&limit={limit}&audioformat=mp32&imagesize=200&order=popularity_week";
+        var url = $"https://api.jamendo.com/v3.0/tracks/?client_id={JamendoClientId}&format=json&limit={limit}&audioformat=mp32&imagesize=200&order=popularity_week&include=musicinfo";
         return await FetchAndSeed(url);
     }
 
@@ -49,14 +61,14 @@ public class JamendoController : ControllerBase
 
         var randomOffset = Random.Shared.Next(0, MaxOffsetRange);
 
-        var url = $"https://api.jamendo.com/v3.0/tracks/?client_id={JamendoClientId}&format=json&limit={count}&offset={randomOffset}&audioformat=mp32&imagesize=200";
+        var url = $"https://api.jamendo.com/v3.0/tracks/?client_id={JamendoClientId}&format=json&limit={count}&offset={randomOffset}&audioformat=mp32&imagesize=200&include=musicinfo";
 
         if (!string.IsNullOrWhiteSpace(tag))
         {
             url += $"&fuzzytags={Uri.EscapeDataString(tag)}";
         }
 
-        return await FetchAndSeed(url);
+        return await FetchAndSeed(url, fallbackGenre: tag);
     }
 
     [HttpPost("seed-albums-random")]
@@ -68,7 +80,7 @@ public async Task<IActionResult> SeedAlbumsRandom([FromQuery] int count = 10, [F
     int currentMaxOffset = string.IsNullOrWhiteSpace(tag) ? 2000 : 200;
     var randomOffset = Random.Shared.Next(0, currentMaxOffset);
 
-    var url = $"https://api.jamendo.com/v3.0/albums/tracks/?client_id={JamendoClientId}&format=json&limit={count}&offset={randomOffset}&audioformat=mp32&imagesize=200";
+    var url = $"https://api.jamendo.com/v3.0/albums/tracks/?client_id={JamendoClientId}&format=json&limit={count}&offset={randomOffset}&audioformat=mp32&imagesize=200&include=musicinfo";
 
     if (!string.IsNullOrWhiteSpace(tag))
     {
@@ -175,8 +187,8 @@ public async Task<IActionResult> SeedAlbumsRandom([FromQuery] int count = 10, [F
                     Title = jTrack.Name,
                     ArtistName = jAlbum.ArtistName,
                     AlbumTitle = jAlbum.Name,
-                    AlbumId = newAlbum.Id, 
-                    Genre = "Jamendo Track",
+                    AlbumId = newAlbum.Id,
+                    Genre = ResolveGenre(jTrack.MusicInfo, tag),
                     DurationSeconds = jTrack.Duration,
                     FileSizeBytes = 0,
                     ContentType = "audio/mpeg",
@@ -203,7 +215,11 @@ public async Task<IActionResult> SeedAlbumsRandom([FromQuery] int count = 10, [F
             }
         }
 
-        if (addedAlbumsCount > 0) await _context.SaveChangesAsync();
+        if (addedAlbumsCount > 0)
+        {
+            await _context.SaveChangesAsync();
+            await InvalidateTrackListCachesAsync();
+        }
 
         return Ok(new
         {
@@ -237,9 +253,18 @@ public async Task<IActionResult> SeedAlbumsRandom([FromQuery] int count = 10, [F
         });
     }
 }
+    // Достаём жанр из musicinfo.tags.genres, которые отдаёт Jamendo при include=musicinfo.
+    // Если API их не вернул (бывает не у всех треков) — падаем на tag из запроса, иначе "Unknown".
+    private static string? ResolveGenre(JamendoMusicInfoDto? musicInfo, string? fallback)
+    {
+        var genre = musicInfo?.Tags?.Genres?.FirstOrDefault(g => !string.IsNullOrWhiteSpace(g));
+        if (!string.IsNullOrWhiteSpace(genre)) return genre;
+        return !string.IsNullOrWhiteSpace(fallback) ? fallback : null;
+    }
+
     // ─── Общая логика запроса к Jamendo + сохранения в БД ──────────────────
 
-    private async Task<IActionResult> FetchAndSeed(string url)
+    private async Task<IActionResult> FetchAndSeed(string url, string? fallbackGenre = null)
     {
         try
         {
@@ -285,7 +310,7 @@ public async Task<IActionResult> SeedAlbumsRandom([FromQuery] int count = 10, [F
                     Title = jTrack.Name,
                     ArtistName = jTrack.ArtistName,
                     AlbumTitle = jTrack.AlbumName ?? "Single",
-                    Genre = "Jamendo Track",
+                    Genre = ResolveGenre(jTrack.MusicInfo, fallbackGenre),
                     DurationSeconds = jTrack.Duration,
                     FileSizeBytes = 0,
                     ContentType = "audio/mpeg",
@@ -303,7 +328,11 @@ public async Task<IActionResult> SeedAlbumsRandom([FromQuery] int count = 10, [F
                 addedCount++;
             }
 
-            if (addedCount > 0) await _context.SaveChangesAsync();
+            if (addedCount > 0)
+            {
+                await _context.SaveChangesAsync();
+                await InvalidateTrackListCachesAsync();
+            }
 
             return Ok(new { Message = $"Успешно добавлено треков: {addedCount}" });
         }
@@ -370,6 +399,19 @@ public class JamendoTrackDto
 
     public string Audio { get; set; } = string.Empty;
     public string Image { get; set; } = string.Empty;
+
+    [JsonPropertyName("musicinfo")]
+    public JamendoMusicInfoDto? MusicInfo { get; set; }
+}
+
+public class JamendoMusicInfoDto
+{
+    public JamendoTagsDto? Tags { get; set; }
+}
+
+public class JamendoTagsDto
+{
+    public List<string> Genres { get; set; } = new();
 }
 
 //----------АЛЬБОМИ DTO-------------
@@ -401,4 +443,7 @@ public class JamendoAlbumTrackDto
     public string Name { get; set; } = string.Empty;
     public int Duration { get; set; }
     public string Audio { get; set; } = string.Empty;
+
+    [JsonPropertyName("musicinfo")]
+    public JamendoMusicInfoDto? MusicInfo { get; set; }
 }

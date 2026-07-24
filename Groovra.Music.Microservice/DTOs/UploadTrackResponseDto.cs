@@ -20,6 +20,9 @@ public class UploadTrackResponseDto
     /// <summary>Genre tag.</summary>
     public string? Genre { get; set; }
 
+    /// <summary>Mood/style tag.</summary>
+    public string? Mood { get; set; }
+
     /// <summary>Duration of the audio in seconds.</summary>
     public double DurationSeconds { get; set; }
 

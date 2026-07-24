@@ -1,8 +1,10 @@
+using Groovra.Music.Microservice.Caching;
 using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Model;
 using Groovra.Music.Microservice.Services;
 using Groovra.Shared.Constants;
 using Groovra.Shared.Extensions;
+using Hangfire;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Groovra.Music.Microservice.Controllers;
@@ -19,11 +21,36 @@ public class TracksController : ControllerBase
     private readonly MusicService _musicService;
     private readonly ILogger<TracksController> _logger;
     private readonly FavoritesService _favoritesService;
-    public TracksController(MusicService musicService, ILogger<TracksController> logger,FavoritesService favoritesService)
+    private readonly ICacheService _cache;
+    private readonly IBackgroundJobClient _backgroundJobs;
+
+    /// <summary>TTL замка-дебаунсера прогрева: столько времени после первого промаха
+    /// новые запросы не ставят повторную джобу (её обычно хватает, чтобы прогрев успел).</summary>
+    private static readonly TimeSpan WarmupDebounce = TimeSpan.FromSeconds(30);
+
+    public TracksController(
+        MusicService musicService,
+        ILogger<TracksController> logger,
+        FavoritesService favoritesService,
+        ICacheService cache,
+        IBackgroundJobClient backgroundJobs)
     {
         _musicService = musicService;
         _logger = logger;
         _favoritesService = favoritesService;
+        _cache = cache;
+        _backgroundJobs = backgroundJobs;
+    }
+
+    /// <summary>Ставит фоновую джобу прогрева кеша — но только если замок свободен, чтобы
+    /// пачка одновременных промахов не запустила десятки одинаковых тяжёлых пересчётов.</summary>
+    private async Task TriggerWarmupIfIdleAsync(CancellationToken cancellationToken)
+    {
+        if (await _cache.TryAcquireLockAsync(CacheKeys.WarmupLock, WarmupDebounce, cancellationToken))
+        {
+            _backgroundJobs.Enqueue<CacheWarmupService>(service => service.WarmUpAsync(CancellationToken.None));
+            _logger.LogInformation("Cold cache: enqueued background warmup job.");
+        }
     }
     
     // GET music/tracks/me
@@ -31,17 +58,18 @@ public class TracksController : ControllerBase
     [ProducesResponseType(typeof(PagedResultDto<TrackDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetMyTracks(
         [FromQuery] string? search,
+        [FromQuery] string? genre,
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-    
+
         if (!HttpContext.TryGetUserId(out var currentUserId))
             return Unauthorized(new { message = "Потрібна авторизація." });
 
         var userRole = Request.Headers["X-User-Role"].ToString();
         if (!userRole.HasRole(AppRoles.Artist) && !userRole.HasRole(AppRoles.Admin))
-            return StatusCode(StatusCodes.Status403Forbidden, 
+            return StatusCode(StatusCodes.Status403Forbidden,
                 new { message = "Тільки артисти мають власні треки." });
 
 
@@ -49,13 +77,13 @@ public class TracksController : ControllerBase
         if (pageSize < 1) pageSize = 20;
         if (pageSize > 100) pageSize = 100;
 
-       
-        var (tracks, totalCount) = await _musicService.GetAllTracksAsync(
-            search, currentUserId, pageNumber, pageSize, cancellationToken);
+
+        var (tracks, totalCount) = await GetTracksWithCacheAsync(
+            search, currentUserId, genre, null, pageNumber, pageSize, cancellationToken);
 
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
-        
+
         var likedIds = await _favoritesService.GetLikedTrackIdsAsync(currentUserId, cancellationToken);
 
     
@@ -69,11 +97,28 @@ public class TracksController : ControllerBase
     
     
     
+    // GET music/tracks/genres — реальные значения Genre, которые сейчас есть в БД
+    // (пришли из импорта Jamendo), чтобы фронтенд не хардкодил список и не расходился с бэком.
+    [HttpGet("genres")]
+    [ProducesResponseType(typeof(IReadOnlyList<string>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetGenres(CancellationToken cancellationToken = default)
+    {
+        var cached = await _cache.GetAsync<List<string>>(CacheKeys.Genres, cancellationToken);
+        if (cached is not null)
+            return Ok(cached);
+
+        var genres = await _musicService.GetDistinctGenresAsync(cancellationToken);
+        await _cache.SetAsync(CacheKeys.Genres, genres.ToList(), TimeSpan.FromMinutes(30), cancellationToken);
+        return Ok(genres);
+    }
+
     [HttpGet]
     [ProducesResponseType(typeof(PagedResultDto<TrackDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAllTracks(
         [FromQuery] string? search,
         [FromQuery] Guid? userId,
+        [FromQuery] string? genre,
+        [FromQuery] string? artist,
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 10,
         CancellationToken cancellationToken = default)
@@ -82,8 +127,8 @@ public class TracksController : ControllerBase
         if (pageSize < 1) pageSize = 10;
         if (pageSize > 100) pageSize = 100;
 
-        var (tracks, totalCount) = await _musicService.GetAllTracksAsync(
-            search, userId, pageNumber, pageSize, cancellationToken);
+        var (tracks, totalCount) = await GetTracksWithCacheAsync(
+            search, userId, genre, artist, pageNumber, pageSize, cancellationToken);
 
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
@@ -102,10 +147,91 @@ public class TracksController : ControllerBase
         var result = new PagedResultDto<TrackDto>(trackDtos, totalCount, pageNumber, pageSize);
         return Ok(result);
     }
-    
-    
-    
-    
+
+    // GET music/tracks/popular
+    [HttpGet("popular")]
+    [ProducesResponseType(typeof(PagedResultDto<TrackDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPopularTracks(
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        if (pageNumber < 1) pageNumber = 1;
+        if (pageSize < 1) pageSize = 10;
+        if (pageSize > 100) pageSize = 100;
+
+        var skip = (pageNumber - 1) * pageSize;
+        var warmTrending = await _cache.GetAsync<CachedTrackPage>(CacheKeys.TrendingTop, cancellationToken);
+
+        // Холодный кеш: НЕ выполняем тяжёлый SQL в запросе (под RESOURCE_SEMAPHORE он висит 20+ сек).
+        // Ставим фоновый прогрев и мгновенно отдаём пустую страницу — фронтенд перезапросит,
+        // когда Hangfire дозаполнит Redis (обычно пара секунд).
+        if (warmTrending is null)
+        {
+            await TriggerWarmupIfIdleAsync(cancellationToken);
+            return Ok(new PagedResultDto<TrackDto>(new List<TrackDto>(), 0, pageNumber, pageSize));
+        }
+
+        // Отдаём запрошенный срез из прогретого топа (за пределами окна — пустая страница, но
+        // totalCount реальный, чтобы пагинация на клиенте оставалась корректной). Всё O(1), без SQL.
+        var tracks = warmTrending.Items.Skip(skip).Take(pageSize).Select(c => c.ToTrack()).ToList();
+        var totalCount = warmTrending.TotalCount;
+
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+
+        HttpContext.TryGetUserId(out var currentUserId);
+
+        var likedIds = currentUserId != Guid.Empty
+            ? await _favoritesService.GetLikedTrackIdsAsync(currentUserId, cancellationToken)
+            : new HashSet<Guid>();
+
+        var trackDtos = tracks
+            .Select(t => MapToDto(t, baseUrl, likedIds.Contains(t.Id)))
+            .ToList();
+
+        return Ok(new PagedResultDto<TrackDto>(trackDtos, totalCount, pageNumber, pageSize));
+    }
+
+    // GET music/tracks/recommendations — секція "Музика за стилем та настроєм" на головній:
+    // базовий (без ML) підбір треків по категоріях настрою/стилю, див. MusicService.GetMoodRecommendationsAsync.
+    [HttpGet("recommendations")]
+    [ProducesResponseType(typeof(List<MoodRecommendationDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMoodRecommendations(
+        [FromQuery] int take = 8,
+        CancellationToken cancellationToken = default)
+    {
+        if (take < 1) take = 1;
+        if (take > 50) take = 50;
+
+        var cacheKey = CacheKeys.RecommendationsMood(take);
+        var groups = await _cache.GetAsync<List<CachedMoodGroup>>(cacheKey, cancellationToken);
+
+        // Холодный кеш: тяжёлый мультизапрос GetMoodRecommendationsAsync НЕ выполняем в запросе.
+        // Ставим фоновый прогрев (он греет take=DefaultRecommendationsTake=8, что и запрашивает
+        // фронтенд) и мгновенно отдаём пустой список — секция дозаполнится после ретрая клиента.
+        if (groups is null)
+        {
+            await TriggerWarmupIfIdleAsync(cancellationToken);
+            return Ok(new List<MoodRecommendationDto>());
+        }
+
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        HttpContext.TryGetUserId(out var currentUserId);
+        var likedIds = currentUserId != Guid.Empty
+            ? await _favoritesService.GetLikedTrackIdsAsync(currentUserId, cancellationToken)
+            : new HashSet<Guid>();
+
+        var response = groups
+            .Select(g => new MoodRecommendationDto
+            {
+                Mood = g.Mood,
+                Tracks = g.Tracks.Select(c => MapToDto(c.ToTrack(), baseUrl, likedIds.Contains(c.Id))).ToList()
+            })
+            .ToList();
+
+        return Ok(response);
+    }
+
     [HttpGet("deleted")]
     public async Task<IActionResult> GetDeletedTracks(CancellationToken cancellationToken)
     {
@@ -140,7 +266,30 @@ public class TracksController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new { Error = ex.Message });
         }
     }
-    
+
+    // DELETE music/tracks/{id}/permanent — остаточне видалення вже soft-deleted треку
+    // (з кошика), не чекаючи 30-денної фонової очистки.
+    [HttpDelete("{id:guid}/permanent")]
+    public async Task<IActionResult> PermanentlyDeleteTrack(Guid id, CancellationToken cancellationToken)
+    {
+        if (!HttpContext.TryGetUserId(out var currentUserId))
+            return Unauthorized(new { Error = "Потрібна авторизація." });
+
+        var userRole = Request.Headers["X-User-Role"].ToString();
+
+        try
+        {
+            var result = await _musicService.PermanentlyDeleteTrackAsync(id, currentUserId, userRole, cancellationToken);
+            if (!result) return NotFound(new { Error = "Видалений трек не знайдено." });
+
+            return Ok(new { message = "Трек остаточно видалено." });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Error = ex.Message });
+        }
+    }
+
 
     // ─── GET /music/tracks/{id} ───────────────────────────────────────────────
 
@@ -153,7 +302,7 @@ public class TracksController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetTrackById(Guid id, CancellationToken cancellationToken)
     {
-        var track = await _musicService.GetTrackByIdAsync(id, cancellationToken);
+        var track = await GetTrackWithCacheAsync(id, cancellationToken);
 
         if (track is null)
             return NotFound(new { Error = $"Трек с id '{id}' не найден." });
@@ -187,29 +336,24 @@ public class TracksController : ControllerBase
     /// долгосрочное кэширование безопасно.
     ///
     /// **Авторизация:**
-    /// Требует заголовок `X-User-Id` (проставляется API Gateway после проверки JWT).
+    /// Публичный эндпоинт — доступен и незарегистрированным пользователям (гостевое
+    /// прослушивание). Учёт прослушиваний по конкретному юзеру всё равно происходит только
+    /// через отдельный авторизованный POST /{id}/play.
     /// </remarks>
     /// <param name="id">GUID трека.</param>
     /// <response code="200">Аудиофайл отдаётся целиком (без заголовка Range).</response>
     /// <response code="206">Частичный контент — ответ на запрос с заголовком <c>Range</c>.</response>
-    /// <response code="401">Заголовок <c>X-User-Id</c> отсутствует или недействителен.</response>
     /// <response code="404">Трек или аудиофайл не найдены.</response>
     /// <response code="416">Запрошенный диапазон байт выходит за пределы файла.</response>
     [HttpGet("{id:guid}/stream")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status206PartialContent)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status416RangeNotSatisfiable)]
     public async Task<IActionResult> StreamTrack(Guid id, CancellationToken cancellationToken = default)
     {
-        // 1. Проверка авторизации шлюза (оставляем твой код)
-        
-        if (!HttpContext.TryGetUserId(out var userId))
-            return Unauthorized(new { Error = "Streaming requires authentication." });
-
         // 2. Достаем трек из базы, чтобы проверить, локальный он или внешний
-        var track = await _musicService.GetTrackByIdAsync(id, cancellationToken);
+        var track = await GetTrackWithCacheAsync(id, cancellationToken);
         if (track is null)
             return NotFound(new { Error = "Трек не найден." });
 
@@ -234,6 +378,41 @@ public class TracksController : ControllerBase
         return PhysicalFile(absolutePath, contentType, enableRangeProcessing: true);
     }
 
+    /// <summary>
+    /// Serves the track as a forced download (Content-Disposition: attachment), or redirects
+    /// to the external audio URL for Jamendo/external tracks. Same auth as /stream.
+    /// </summary>
+    [HttpGet("{id:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadTrack(Guid id, CancellationToken cancellationToken = default)
+    {
+        if (!HttpContext.TryGetUserId(out var userId))
+            return Unauthorized(new { Error = "Download requires authentication." });
+
+        var track = await GetTrackWithCacheAsync(id, cancellationToken);
+        if (track is null)
+            return NotFound(new { Error = "Трек не найден." });
+
+        if (track.IsExternal)
+        {
+            _logger.LogInformation("Download (External): редирект трека {TrackId} на Jamendo URL.", id);
+            return Redirect(track.ExternalAudioUrl!);
+        }
+
+        var fileInfo = await _musicService.GetTrackFileInfoAsync(id, cancellationToken);
+        if (fileInfo is null) return NotFound();
+
+        var (absolutePath, contentType) = fileInfo.Value;
+        if (!System.IO.File.Exists(absolutePath)) return NotFound();
+
+        var safeFileName = string.Join("_", $"{track.ArtistName} - {track.Title}".Split(Path.GetInvalidFileNameChars()));
+        var extension = Path.GetExtension(absolutePath);
+
+        return PhysicalFile(absolutePath, contentType, $"{safeFileName}{extension}", enableRangeProcessing: false);
+    }
+
     // POST music/tracks/{id}/play
     [HttpPost("{id:guid}/play")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -244,7 +423,7 @@ public class TracksController : ControllerBase
         if (!HttpContext.TryGetUserId(out var userId))
             return Unauthorized(new { Error = "Streaming requires authentication." });
 
-        var trackExists = await _musicService.GetTrackByIdAsync(id, cancellationToken);
+        var trackExists = await GetTrackWithCacheAsync(id, cancellationToken);
         if (trackExists is null)
             return NotFound(new { Error = "Трек не найден." });
 
@@ -377,6 +556,34 @@ public async Task<IActionResult> RenameTrack(
     }
 }
 
+    // GET music/tracks/{id}/lyrics — публично доступно (гостям тоже)
+    [HttpGet("{id:guid}/lyrics")]
+    [ProducesResponseType(typeof(LyricsResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetLyrics(
+        Guid id,
+        [FromServices] LyricsService lyricsService,
+        CancellationToken cancellationToken = default)
+    {
+        // Намеренно не через кеш: LyricsService сам замыкает короткий путь по
+        // track.LyricsLrc (уже найденный текст в БД), а CachedTrack это поле не хранит —
+        // прогон через Redis-кеш каждый раз обнулял бы его и спамил внешний LRCLIB API.
+        var track = await _musicService.GetTrackByIdAsync(id, cancellationToken);
+        if (track is null)
+            return NotFound(new { Error = $"Трек с id '{id}' не найден." });
+
+        var lrc = await lyricsService.GetOrCreateLyricsAsync(track, cancellationToken);
+
+        return Ok(new LyricsResponseDto
+        {
+            TrackId = track.Id,
+            Title = track.Title,
+            Artist = track.ArtistName,
+            Lrc = lrc ?? string.Empty,
+            IsInstrumental = string.IsNullOrEmpty(lrc)
+        });
+    }
+
     // ─── helpers ────────────────────────────────────────────────────────
 
     private static TrackDto MapToDto(Track track, string baseUrl, bool isLiked = false)
@@ -396,6 +603,7 @@ public async Task<IActionResult> RenameTrack(
             ArtistName      = track.ArtistName,
             Album           = track.AlbumTitle ?? track.Album?.Title, // ← было: track.Album
             Genre           = track.Genre,
+            Mood            = track.Mood,
             DurationSeconds = track.DurationSeconds,
             FileSizeBytes   = track.FileSizeBytes,
             ContentType     = track.ContentType,
@@ -405,5 +613,45 @@ public async Task<IActionResult> RenameTrack(
             PlayCount       = track.PlayCount,
             IsLiked         = isLiked
         };
+    }
+
+    /// <summary>Cache-aside для поиска/пагинации (GET /tracks и /tracks/me): ключ учитывает
+    /// все параметры запроса, TTL короткий — расхождение с БД не успевает стать заметным.</summary>
+    private async Task<(IReadOnlyList<Track> Items, int TotalCount)> GetTracksWithCacheAsync(
+        string? search, Guid? userId, string? genre, string? artist,
+        int pageNumber, int pageSize, CancellationToken cancellationToken)
+    {
+        var key = CacheKeys.TracksSearch(search, userId, genre, artist, pageNumber, pageSize);
+        var cached = await _cache.GetAsync<CachedTrackPage>(key, cancellationToken);
+        if (cached is not null)
+            return (cached.Items.Select(c => c.ToTrack()).ToList(), cached.TotalCount);
+
+        var (items, totalCount) = await _musicService.GetAllTracksAsync(
+            search, userId, genre, artist, pageNumber, pageSize, cancellationToken);
+
+        var payload = new CachedTrackPage
+        {
+            Items = items.Select(CachedTrack.FromTrack).ToList(),
+            TotalCount = totalCount
+        };
+        await _cache.SetAsync(key, payload, TimeSpan.FromMinutes(5), cancellationToken);
+
+        return (items, totalCount);
+    }
+
+    /// <summary>Cache-aside для одиночного трека (по id). PlayCount может отставать в пределах
+    /// TTL — это осознанный компромисс, инвалидировать на каждый play нецелесообразно (горячий путь).</summary>
+    private async Task<Track?> GetTrackWithCacheAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var key = CacheKeys.Track(id);
+        var cached = await _cache.GetAsync<CachedTrack>(key, cancellationToken);
+        if (cached is not null)
+            return cached.ToTrack();
+
+        var track = await _musicService.GetTrackByIdAsync(id, cancellationToken);
+        if (track is not null)
+            await _cache.SetAsync(key, CachedTrack.FromTrack(track), TimeSpan.FromMinutes(10), cancellationToken);
+
+        return track;
     }
 }

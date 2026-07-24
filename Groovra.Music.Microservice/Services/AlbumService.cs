@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Groovra.Music.Microservice.Caching;
 using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Model;
 using Groovra.Shared.ServiceResult;
@@ -16,12 +17,22 @@ public class AlbumService
     private readonly MusicDbContext _context;
     private readonly ILogger<AlbumService> _logger;
     private readonly UploadService _uploadService;
+    private readonly ICacheService _cache;
 
-    public AlbumService(MusicDbContext context, UploadService uploadService, ILogger<AlbumService> logger)
+    public AlbumService(MusicDbContext context, UploadService uploadService, ICacheService cache, ILogger<AlbumService> logger)
     {
         _context = context;
         _uploadService = uploadService;
+        _cache = cache;
         _logger = logger;
+    }
+
+    /// <summary>Скидає кеш пошуку альбомів і артистів (список артистів рахує AlbumCount
+    /// із таблиці Albums) — викликається з кожного методу, що змінює каталог альбомів.</summary>
+    private async Task InvalidateAlbumsCacheAsync(CancellationToken cancellationToken)
+    {
+        await _cache.RemoveByPatternAsync(CacheKeys.AlbumsSearchPatternAll, cancellationToken);
+        await _cache.RemoveByPatternAsync(CacheKeys.ArtistsSearchPatternAll, cancellationToken);
     }
     
     // ─── Create ──────────────────────────────────────────────────────────────
@@ -74,7 +85,8 @@ public class AlbumService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
-        
+        await InvalidateAlbumsCacheAsync(cancellationToken);
+
         var albumDto = MapToDto(album, album.Tracks.ToList(), baseUrl, false);
         return ServiceResult<(AlbumDto, BulkTrackOperationResult)>.Ok((albumDto, trackResult));
     }
@@ -122,6 +134,7 @@ public class AlbumService
                 .ExecuteUpdateAsync(s => s.SetProperty(t => t.AlbumTitle, album.Title), cancellationToken);
         }
 
+        await InvalidateAlbumsCacheAsync(cancellationToken);
         return ServiceResult<bool>.Ok(true);
     }
 
@@ -130,11 +143,26 @@ public class AlbumService
     {
         if (string.IsNullOrWhiteSpace(album.CoverImageRelativePath))
         {
-            return "https://img.jamendo.com/albums/default.png"; 
+            return "https://img.jamendo.com/albums/default.png";
         }
 
         var normalizedPath = album.CoverImageRelativePath.Replace('\\', '/');
         return $"{baseUrl}/music/files/{normalizedPath}";
+    }
+
+    // ─── Колаж із перших 4 обкладинок треків (для UI, як у плейлистів) ─────────
+    private static List<string> BuildCollageCovers(IEnumerable<Track> tracks, string baseUrl)
+    {
+        return tracks
+            .Take(4)
+            .Select(t => t.IsExternal
+                ? t.ExternalCoverUrl
+                : !string.IsNullOrWhiteSpace(t.CoverImageRelativePath)
+                    ? $"{baseUrl}/music/files/{t.CoverImageRelativePath.Replace('\\', '/')}"
+                    : null)
+            .Where(url => url != null)
+            .Select(url => url!)
+            .ToList();
     }
 
     // ─── GetRaw (для перевірки прав доступу у контролері) ──────────────────────
@@ -168,6 +196,7 @@ public class AlbumService
         string? searchTerm,
         HashSet<Guid> likedAlbumIds,
         string baseUrl,
+        string? genre = null,
         int pageNumber = 1,
         int pageSize = 20,
         CancellationToken cancellationToken = default)
@@ -181,13 +210,39 @@ public class AlbumService
         if (!string.IsNullOrWhiteSpace(searchTerm))
             query = query.Where(a => a.Title.Contains(searchTerm) || a.ArtistName.Contains(searchTerm));
 
+        if (!string.IsNullOrWhiteSpace(genre))
+        {
+            // БД вже регістронезалежна (Cyrillic_General_CI_AS) — без .ToLower(), інакше
+            // предикат несаргабельний і індекс по Genre використати неможливо.
+            var trimmedGenre = genre.Trim();
+            query = query.Where(a => a.Tracks.Any(t => t.Genre != null && t.Genre == trimmedGenre));
+        }
+
         var totalCount = await query.CountAsync(cancellationToken);
 
+        // БЕЗ .Include(a => a.Tracks.OrderBy(...).Take(4)) — цей патерн генерує
+        // CROSS/OUTER APPLY з ORDER BY+TOP на КОЖЕН альбом-рядок, що просить у SQL Server
+        // memory grant під сортування. Саме це (а не обсяг даних — усього 3 альбоми в БД)
+        // спричиняло стабільні ~25с RESOURCE_SEMAPHORE-очікування на кожен виклик пошуку
+        // альбомів. Замість цього — прості альбоми одним запитом, а колаж обкладинок
+        // окремим дешевим WHERE-IN запитом лише для сторінки результатів (без per-row сорту).
         var albums = await query
             .OrderByDescending(a => a.CreatedAt)
+            .ThenBy(a => a.Id) // стабільний тайбрейкер на випадок збігу CreatedAt (масовий імпорт)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
+
+        var albumIds = albums.Select(a => a.Id).ToList();
+        var collageByAlbum = albumIds.Count == 0
+            ? new Dictionary<Guid, List<Track>>()
+            : (await _context.Tracks
+                    .AsNoTracking()
+                    .Where(t => t.AlbumId != null && albumIds.Contains(t.AlbumId.Value))
+                    .OrderBy(t => t.UploadedAt)
+                    .ToListAsync(cancellationToken))
+                .GroupBy(t => t.AlbumId!.Value)
+                .ToDictionary(g => g.Key, g => g.Take(4).ToList());
 
         var items = albums.Select(a => new AlbumListItemDto
         {
@@ -199,6 +254,7 @@ public class AlbumService
             TotalDurationSeconds = a.TotalDurationSeconds,
             ReleaseDate          = a.ReleaseDate,
             IsLiked              = likedAlbumIds.Contains(a.Id),
+            CollageCovers        = BuildCollageCovers(collageByAlbum.GetValueOrDefault(a.Id, []), baseUrl),
         }).ToList();
 
         return (items, totalCount);
@@ -222,6 +278,7 @@ public class AlbumService
         {
             album.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync(cancellationToken);
+            await InvalidateAlbumsCacheAsync(cancellationToken);
         }
 
         return result;
@@ -300,6 +357,7 @@ public class AlbumService
         album.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
+        await InvalidateAlbumsCacheAsync(cancellationToken);
         return ServiceResult<bool>.Ok(true);
     }
 
@@ -322,6 +380,7 @@ public class AlbumService
         album.UpdatedAt = now;
 
         await _context.SaveChangesAsync(cancellationToken);
+        await InvalidateAlbumsCacheAsync(cancellationToken);
 
         _logger.LogInformation("Album soft-deleted. Tracks preserved. Id={Id}", albumId);
         return ServiceResult<bool>.Ok(true);
@@ -368,11 +427,38 @@ public class AlbumService
         album.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
+        await InvalidateAlbumsCacheAsync(cancellationToken);
         return ServiceResult<bool>.Ok(true);
     }
-    
-    
-    
+
+    // ─── PermanentDelete ─────────────────────────────────────────────────────
+
+    /// <summary>Остаточно видаляє вже soft-deleted альбом (з кошика) — БД-запис і обкладинку
+    /// з диска — не чекаючи 30-денної фонової очистки (<see cref="GarbageCollectorService.CleanUpGarbageAsync"/>).
+    /// Треки, що були в альбомі, НЕ чіпаємо (FK — SetNull), як і при звичайному soft-delete.</summary>
+    public async Task<ServiceResult<bool>> PermanentlyDeleteAlbumAsync(
+        Guid albumId, Guid currentUserId, string userRoles, CancellationToken cancellationToken = default)
+    {
+        var album = await _context.Albums
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(a => a.Id == albumId && a.IsDeleted, cancellationToken);
+
+        if (album is null)
+            return ServiceResult<bool>.Fail("Видалений альбом не знайдено.");
+
+        if (album.UserId != currentUserId && !userRoles.HasRole(AppRoles.Admin))
+            return ServiceResult<bool>.Fail("Немає прав для остаточного видалення цього альбому.");
+
+        _uploadService.DeleteRelativeFile(album.CoverImageRelativePath);
+
+        _context.Albums.Remove(album);
+        await _context.SaveChangesAsync(cancellationToken);
+        await InvalidateAlbumsCacheAsync(cancellationToken);
+
+        _logger.LogInformation("Album permanently deleted. Id={Id}", albumId);
+        return ServiceResult<bool>.Ok(true);
+    }
+
     // ─── GenerateRandomAlbums (bulk seed для тестових даних) ───────────────────────
     public async Task<ServiceResult<List<AlbumDto>>> GenerateRandomAlbumsAsync(
         Guid ownerUserId, string artistName, int albumsCount, int tracksPerAlbum, 
@@ -417,6 +503,7 @@ public class AlbumService
         // Сохраняем все альбомы и треки одной транзакцией
         await _context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await InvalidateAlbumsCacheAsync(cancellationToken);
 
         _logger.LogInformation("Сгенерировано {Count} альбомов", createdAlbums.Count);
         return ServiceResult<List<AlbumDto>>.Ok(createdAlbums);
@@ -444,8 +531,8 @@ public class AlbumService
 
         if (!string.IsNullOrWhiteSpace(genre))
         {
-            var trimmedGenre = genre.Trim().ToLower();
-            query = query.Where(t => t.Genre != null && t.Genre.ToLower() == trimmedGenre);
+            var trimmedGenre = genre.Trim();
+            query = query.Where(t => t.Genre != null && t.Genre == trimmedGenre);
         }
 
         var randomTracks = await query
@@ -467,6 +554,7 @@ public class AlbumService
 
         album.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
+        await InvalidateAlbumsCacheAsync(cancellationToken);
 
         var allAlbumTracks = await _context.Tracks
             .Where(t => t.AlbumId == albumId)
@@ -495,6 +583,7 @@ public class AlbumService
             TotalDurationSeconds = album.TotalDurationSeconds,
             CreatedAt            = album.CreatedAt,
             IsLiked              = isLiked,
+            CollageCovers        = BuildCollageCovers(tracks, baseUrl),
             Tracks = tracks.Select(t => new AlbumTrackItemDto
             {
                 TrackId         = t.Id,

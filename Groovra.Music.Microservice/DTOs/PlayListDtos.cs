@@ -47,6 +47,7 @@ public class PlaylistListItemDto
     public string? Description { get; set; }
     public bool IsPrivate { get; set; }
     public bool IsLiked { get; set; }
+    public bool IsOwner { get; set; }
     public string Slug { get; set; } = string.Empty;
     public int TrackCount { get; set; }
     public double TotalDurationSeconds { get; set; }

@@ -34,11 +34,16 @@ public class TokenService
         
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
+        // Время жизни access-токена берём из конфига (Jwt:AccessTokenMinutes), по умолчанию 60 мин.
+        // Раньше было жёстко 5 мин — это заставляло фронт дёргать /auth/refresh каждые ~5 минут и
+        // на каждой перезагрузке страницы, а любой сбой такого refresh разлогинивал пользователя.
+        var accessTokenMinutes = _configuration.GetValue<int?>("Jwt:AccessTokenMinutes") ?? 60;
+
         var token = new JwtSecurityToken(
             issuer: _configuration["Jwt:Issuer"],
             audience: _configuration["Jwt:Audience"],
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(5),
+            expires: DateTime.UtcNow.AddMinutes(accessTokenMinutes),
             signingCredentials: creds
         );
 

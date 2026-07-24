@@ -1,3 +1,4 @@
+using Groovra.Music.Microservice.Caching;
 using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Model;
 using Microsoft.EntityFrameworkCore;
@@ -24,13 +25,12 @@ public class UploadService
     /// <summary>Accepted audio MIME types.</summary>
     private static readonly HashSet<string> AllowedAudioMimeTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "audio/mpeg",        // .mp3
-        "audio/wav",         // .wav
-        "audio/ogg",         // .ogg
-        "audio/flac",        // .flac
-        "audio/aac",         // .aac
-        "audio/x-m4a",       // .m4a
-        "audio/mp4",         // .m4a / .mp4 audio
+        "audio/mpeg", "audio/mp3", "audio/mpeg3", "audio/x-mpeg-3", // .mp3 (разные браузеры/ОС отдают разные варианты)
+        "audio/wav", "audio/x-wav",   // .wav
+        "audio/ogg",                  // .ogg
+        "audio/flac", "audio/x-flac", // .flac
+        "audio/aac",                  // .aac
+        "audio/x-m4a", "audio/mp4",   // .m4a / .mp4 audio
     };
 
     /// <summary>Accepted image MIME types for cover art.</summary>
@@ -46,17 +46,19 @@ public class UploadService
     private readonly MusicDbContext _db;
     private readonly IConfiguration _configuration;
     private readonly ILogger<UploadService> _logger;
+    private readonly ICacheService _cache;
 
     /// <summary>Absolute root path where media files will be stored.</summary>
     private readonly string _mediaBasePath;
 
     // ─── constructor ─────────────────────────────────────────────────────────
 
-    public UploadService(MusicDbContext db, IConfiguration configuration, ILogger<UploadService> logger)
+    public UploadService(MusicDbContext db, IConfiguration configuration, ILogger<UploadService> logger, ICacheService cache)
     {
         _db = db;
         _configuration = configuration;
         _logger = logger;
+        _cache = cache;
 
         // Read storage root from config; default to "MediaStorage" next to the executable.
         var configured = _configuration["MediaStorage:BasePath"];
@@ -67,6 +69,29 @@ public class UploadService
         // Ensure the root directory (and sub-dirs) exist on startup.
         Directory.CreateDirectory(Path.Combine(_mediaBasePath, "audio"));
         Directory.CreateDirectory(Path.Combine(_mediaBasePath, "covers"));
+    }
+
+    /// <summary>Best-effort видалення файлу медіасховища за відносним шляхом — не кидає,
+    /// якщо файлу вже нема. Використовується при остаточному (не soft) видаленні треків/
+    /// альбомів/плейлистів користувачем, поза межами 30-денної джоби
+    /// <see cref="GarbageCollectorService.CleanUpGarbageAsync"/>.</summary>
+    public void DeleteRelativeFile(string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath)) return;
+
+        try
+        {
+            var absolutePath = Path.Combine(_mediaBasePath, relativePath.TrimStart('\\', '/'));
+            if (File.Exists(absolutePath))
+            {
+                File.Delete(absolutePath);
+                _logger.LogDebug("Файл остаточно видалено з диска: {Path}", absolutePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Помилка при остаточному видаленні файлу: {RelativePath}", relativePath);
+        }
     }
 
     // ─── public API ──────────────────────────────────────────────────────────
@@ -101,7 +126,9 @@ public class UploadService
         ValidateAudioFile(dto.File);
 
         // ── 2. Валідація обкладинки (якщо є) ───────────────────────────────
-        if (dto.CoverImage is not null)
+        // Length > 0 отсекает случай, когда форма всегда шлёт поле CoverImage,
+        // но пустым (без выбранного файла) — иначе ValidateCoverImage упадёт на пустом файле.
+        if (dto.CoverImage is not null && dto.CoverImage.Length > 0)
         {
             ValidateCoverImage(dto.CoverImage);
         }
@@ -135,7 +162,7 @@ public class UploadService
 
         // ── 5. Збереження обкладинки (якщо є) ───────────────────────────────
         string? coverRelativePath = null;
-        if (dto.CoverImage is not null)
+        if (dto.CoverImage is not null && dto.CoverImage.Length > 0)
         {
             var coverExt = Path.GetExtension(dto.CoverImage.FileName).ToLowerInvariant();
             var coverFileName = $"{trackId}_cover{coverExt}";
@@ -158,6 +185,7 @@ public class UploadService
             ArtistName = artistName.Trim(),   
             AlbumTitle = string.IsNullOrWhiteSpace(dto.Album) ? null : dto.Album.Trim(),
             Genre = string.IsNullOrWhiteSpace(dto.Genre) ? null : dto.Genre.Trim(),
+            Mood = string.IsNullOrWhiteSpace(dto.Mood) ? null : dto.Mood.Trim(),
             DurationSeconds = durationSeconds, // <--- Використовуємо реальну тривалість
             FileSizeBytes = dto.File.Length,
             ContentType = dto.File.ContentType,
@@ -213,6 +241,14 @@ public class UploadService
             // Link the track to the album and save changes
             track.AlbumId = album.Id;
             await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Новый трек попадает в поиск/тренды/рекомендации и, возможно, в список жанров —
+        // сбрасываем связанные кеши списков, чтобы он не "потерялся" до истечения TTL.
+        await _cache.RemoveAsync(CacheKeys.Genres, cancellationToken);
+        foreach (var pattern in CacheKeys.ListPatterns)
+        {
+            await _cache.RemoveByPatternAsync(pattern, cancellationToken);
         }
 
         return track;

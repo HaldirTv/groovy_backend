@@ -61,6 +61,30 @@ public class FavoritesService
         return tracks.Select(t => MapToDto(t, baseUrl));
     }
 
+    /// <summary>
+    /// Пагінований варіант <see cref="GetUserFavoriteTracksAsync"/> — для UI зі стрічкою
+    /// улюблених треків, що підвантажується частинами (кнопка "Завантажити ще").
+    /// </summary>
+    public async Task<(IReadOnlyList<TrackDto> Items, int TotalCount)> GetUserFavoriteTracksPagedAsync(
+        Guid userId, string baseUrl, int pageNumber, int pageSize, CancellationToken cancellationToken = default)
+    {
+        var query = _context.FavoriteTracks
+            .Where(f => f.UserId == userId)
+            .Include(f => f.Track)
+            .OrderByDescending(f => f.LikedAt)
+            .Select(f => f.Track!)
+            .AsNoTracking();
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var tracks = await query
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return (tracks.Select(t => MapToDto(t, baseUrl)).ToList(), totalCount);
+    }
+
     public async Task<HashSet<Guid>> GetLikedTrackIdsAsync(
         Guid userId, CancellationToken token = default)
     {
@@ -113,12 +137,13 @@ public class FavoritesService
         var albums = await _context.FavoriteAlbums
             .Where(f => f.UserId == userId && ! f.Album.IsDeleted)
             .Include(f => f.Album)
+                .ThenInclude(a => a!.Tracks.OrderBy(t => t.UploadedAt).Take(4))
             .Select(f => f.Album!)
             .AsNoTracking()
             .ToListAsync();
 
         return albums.Select(a => MapAlbumToListItemDto(a, baseUrl, isLiked: true));
-    }     
+    }
 
     public async Task<HashSet<Guid>> GetLikedAlbumIdsAsync(
         Guid userId, CancellationToken token = default)
@@ -281,6 +306,16 @@ public class FavoritesService
             TotalDurationSeconds = album.TotalDurationSeconds,
             ReleaseDate          = album.ReleaseDate,
             IsLiked              = isLiked,
+            CollageCovers = album.Tracks
+                .Take(4)
+                .Select(t => t.IsExternal
+                    ? t.ExternalCoverUrl
+                    : !string.IsNullOrWhiteSpace(t.CoverImageRelativePath)
+                        ? $"{baseUrl}/music/files/{t.CoverImageRelativePath.Replace('\\', '/')}"
+                        : null)
+                .Where(url => url != null)
+                .Select(url => url!)
+                .ToList(),
         };
     }
 }

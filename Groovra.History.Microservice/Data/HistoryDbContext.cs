@@ -21,7 +21,13 @@ public class HistoryDbContext : DbContext
         modelBuilder.Entity<PlaybackHistory>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => e.UserId); 
+            entity.HasIndex(e => e.UserId);
+            // SQL Server datetime2 не хранит DateTimeKind — при чтении EF Core всегда
+            // возвращает Kind=Unspecified, из-за чего фронтенд парсит UTC-момент как локальное время.
+            entity.Property(e => e.PlayedAt)
+                .HasConversion(
+                    v => v,
+                    v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
         });
     }
 }

@@ -94,8 +94,9 @@ public class UploadController : ControllerBase
         else
         {
             finalOwnerId = currentUserId; // Владелец — тот, кто нажал кнопку
-            finalArtistName = userName; // Имя берем из заголовков шлюза, там уже должно быть реальное имя артиста
-
+            // Артист может задать отображаемое имя явно (например псевдоним),
+            // иначе берём реальное имя из заголовков шлюза.
+            finalArtistName = !string.IsNullOrWhiteSpace(dto.ArtistName) ? dto.ArtistName! : userName;
         }
 
 
@@ -117,6 +118,7 @@ public class UploadController : ControllerBase
                 ArtistName = track.ArtistName, // Вернется уже проверенное имя
                 Album = track.AlbumTitle ?? track.Album?.Title,
                 Genre = track.Genre,
+                Mood = track.Mood,
                 DurationSeconds = track.DurationSeconds,
                 FileSizeBytes = track.FileSizeBytes,
                 ContentType = track.ContentType,

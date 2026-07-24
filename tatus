@@ -1,0 +1,20 @@
+[33mbf8f256[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m Fix: Kestrel ConfigureKestrel needs explicit 8080 endpoint or REST stops being served
+[33mc0e3989[m Smal changes: setupsome configuration for solving history problem
+[33m4ad76c4[m Small Fix: Added explicit HTTP2
+[33m6cef1fa[m Small Fix: Added setup for avoiding encryptedSupport between microservices in History and Music
+[33ma58be93[m Small Fix: Added prepared folders in start
+[33m64adc37[m Small Fix: Added regex for cors policy with frontend
+[33m0a299fc[m Small FIxed: settle actual front addres
+[33mef3525f[m Small fixes: Added normal domain
+[33me832340[m Small Fix:Change Cors make more dynamic
+[33m1caa6b3[m Change appsettings.json for deployment
+[33m0c0a32e[m Forgot add CaddyFile
+[33m3ce97e3[m Change Program.cs
+[33m397b9fa[m Again Changed docker-compose.yml
+[33meea3381[m small fix: delete slash
+[33m9b2d719[m Prepeared for deployment FIX:Added limit rate, DDOS defense
+[33m1aafd50[m[33m ([m[1;32mMusic[m[33m, [m[1;32mAuthBranchAndMusic[m[33m)[m Small change:Adjust hangfire sql connection for deployment
+[33mfa56cbc[m Merge pull request #12 from HaldirTv/developing
+[33me8d954b[m chore: setup docker-compose and environment variables
+[33m4378085[m Merge pull request #11 from HaldirTv/developing
+[33m94a533b[m Fix problem with migrations in music

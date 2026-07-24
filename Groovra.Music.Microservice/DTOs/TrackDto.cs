@@ -20,6 +20,9 @@ public class TrackDto
     /// <summary>Жанр (может быть null).</summary>
     public string? Genre { get; set; }
 
+    /// <summary>Настрій/стиль для секції рекомендацій (может быть null).</summary>
+    public string? Mood { get; set; }
+
     /// <summary>Длительность в секундах.</summary>
     public double DurationSeconds { get; set; }
 

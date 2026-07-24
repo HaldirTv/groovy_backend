@@ -46,15 +46,34 @@ public class FavoritesController : ControllerBase
         return Ok(new { message = "Удалено из избранного" });
     }
 
+    // Без pageNumber/pageSize — повний список (потрібен, наприклад, плеєру для обчислення
+    // повного набору лайкнутих id). З pageNumber/pageSize — сторінка результатів для UI
+    // зі стрічкою улюблених треків, що підвантажується частинами.
     [HttpGet]
-    public async Task<IActionResult> GetMyFavorites()
+    public async Task<IActionResult> GetMyFavorites(
+        [FromQuery] int? pageNumber,
+        [FromQuery] int? pageSize,
+        CancellationToken cancellationToken)
     {
         if (!TryGetUserId(out var userId))
             return Unauthorized(new { Error = "Streaming requires authentication." });
 
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
-        var tracks = await _favoritesService.GetUserFavoriteTracksAsync(userId, baseUrl);
-        return Ok(tracks);
+
+        if (pageNumber is null && pageSize is null)
+        {
+            var tracks = await _favoritesService.GetUserFavoriteTracksAsync(userId, baseUrl);
+            return Ok(tracks);
+        }
+
+        var page = pageNumber ?? 1;
+        var size = pageSize ?? 10;
+        if (page < 1) page = 1;
+        if (size < 1) size = 10;
+        if (size > 100) size = 100;
+
+        var (items, totalCount) = await _favoritesService.GetUserFavoriteTracksPagedAsync(userId, baseUrl, page, size, cancellationToken);
+        return Ok(new PagedResultDto<TrackDto>(items, totalCount, page, size));
     }
 
     // ─── Albums ─────────────────────────────────────────────────────────────

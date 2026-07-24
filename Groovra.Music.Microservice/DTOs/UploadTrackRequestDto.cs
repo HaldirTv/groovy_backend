@@ -17,7 +17,10 @@ public class UploadTrackRequestDto
 
     /// <summary>Genre tag (e.g. "Hip-Hop", "Electronic").</summary>
     public string? Genre { get; set; }
-    
+
+    /// <summary>Mood/style tag for the recommendations section (e.g. "Chill", "Workout").</summary>
+    public string? Mood { get; set; }
+
     public Guid? TargetUserId { get; set; }
     
     /// <summary>

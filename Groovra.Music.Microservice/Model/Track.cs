@@ -21,6 +21,11 @@ public class Track
     [MaxLength(128)]
     public string? Genre { get; set; }
 
+    /// <summary>Категорія настрою/стилю для секції рекомендацій (напр. "Chill", "Workout") —
+    /// вільний текст за тим самим принципом, що й Genre, виставляється лише при завантаженні.</summary>
+    [MaxLength(64)]
+    public string? Mood { get; set; }
+
     /// <summary>Длительность в секундах (0 = не определена).</summary>
     public double DurationSeconds { get; set; }
 
@@ -58,7 +63,11 @@ public class Track
     public long PlayCount { get; set; } = 0;
     public bool IsDeleted { get; set; } = false;
     public DateTime? DeletedAt { get; set; }
-    
+
+    /// <summary>Синхронизированный текст песни в формате LRC. Null = ещё не искали,
+    /// пустая строка = уже искали и подтвердили, что трек инструментальный (кэш "не найдено").</summary>
+    public string? LyricsLrc { get; set; }
+
     [NotMapped]
     public string? CoverImageUrl
     {

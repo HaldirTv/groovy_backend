@@ -318,6 +318,13 @@ namespace Groovra.Music.Microservice.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
 
+                    b.Property<string>("LyricsLrc")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Mood")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<long>("PlayCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
@@ -338,7 +345,69 @@ namespace Groovra.Music.Microservice.Migrations
 
                     b.HasIndex("AlbumId");
 
+                    b.HasIndex("IsDeleted", "PlayCount")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("IX_Tracks_IsDeleted_PlayCount");
+
                     b.ToTable("Tracks", "music");
+                });
+
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.TrackComment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AuthorName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("LikesCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid>("TrackId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TrackId");
+
+                    b.ToTable("TrackComments", "music");
+                });
+
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.TrackCommentLike", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CommentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommentId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("TrackCommentLikes", "music");
                 });
 
             modelBuilder.Entity("Groovra.Music.Microservice.Model.FavoriteAlbum", b =>
@@ -401,6 +470,28 @@ namespace Groovra.Music.Microservice.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Album");
+                });
+
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.TrackComment", b =>
+                {
+                    b.HasOne("Groovra.Music.Microservice.Model.Track", "Track")
+                        .WithMany()
+                        .HasForeignKey("TrackId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Track");
+                });
+
+            modelBuilder.Entity("Groovra.Music.Microservice.Model.TrackCommentLike", b =>
+                {
+                    b.HasOne("Groovra.Music.Microservice.Model.TrackComment", "Comment")
+                        .WithMany()
+                        .HasForeignKey("CommentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Comment");
                 });
 
             modelBuilder.Entity("Groovra.Music.Microservice.Model.Album", b =>

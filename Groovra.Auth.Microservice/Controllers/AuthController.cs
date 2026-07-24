@@ -46,15 +46,9 @@ public class AuthController : ControllerBase
         var user = result.Data;
         string deviceId = string.IsNullOrWhiteSpace(confirmRegisterDto.DeviceId) ? "default_web_client" : confirmRegisterDto.DeviceId;
         string refreshToken = await _reglogService.CreateSessionAsync(user.Email, deviceId, ctoken);
-        
-        Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions 
-        { 
-            HttpOnly = true, 
-            Secure = true, 
-            SameSite = SameSiteMode.None, 
-            Expires = DateTimeOffset.UtcNow.AddDays(30) 
-        });
-        
+
+        AppendRefreshTokenCookie(refreshToken);
+
         return Ok(new { Message = "User verified successfully!", Token = _tokenService.GenerateToken(result.Data) });
     }
 
@@ -67,14 +61,8 @@ public class AuthController : ControllerBase
         var user = result.Data;
         string deviceId = string.IsNullOrWhiteSpace(dto.DeviceId) ? "default_web_client" : dto.DeviceId;
         string refreshToken = await _reglogService.CreateSessionAsync(user.Email, deviceId, cancellationToken);
-        
-        Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions 
-        { 
-            HttpOnly = true, 
-            Secure = true, 
-            SameSite = SameSiteMode.None, 
-            Expires = DateTimeOffset.UtcNow.AddDays(30) 
-        });
+
+        AppendRefreshTokenCookie(refreshToken);
 
         return Ok(new { Message = "User logged in successfully!", Token = _tokenService.GenerateToken(user) });
     }
@@ -95,11 +83,11 @@ public class AuthController : ControllerBase
                 }
             });
 
-           
+
             TokenResponse tokenResponse = await flow.ExchangeCodeForTokenAsync(
                 userId: "user",
                 code: dto.Code,
-                redirectUri: _configuration["Authentication:Google:RedirectUri"], 
+                redirectUri: ResolveGoogleRedirectUri(dto.RedirectUri),
                 ctoken
             );
 
@@ -115,18 +103,12 @@ public class AuthController : ControllerBase
             
             
             string refreshToken = await _reglogService.CreateSessionAsync(user.Email, deviceId, ctoken);
-            
-            Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions 
-            { 
-                HttpOnly = true, 
-                Secure = true, 
-                SameSite = SameSiteMode.None, 
-                Expires = DateTimeOffset.UtcNow.AddDays(30) 
-            });
 
-            return Ok(new { 
-                Message = "User authenticated via Google successfully!", 
-                Token = _tokenService.GenerateToken(user) 
+            AppendRefreshTokenCookie(refreshToken);
+
+            return Ok(new {
+                Message = "User authenticated via Google successfully!",
+                Token = _tokenService.GenerateToken(user)
             });
         }
         catch (TokenResponseException tokenEx)
@@ -138,8 +120,28 @@ public class AuthController : ControllerBase
             return BadRequest(new { Message = "Google Auth failed.", Details = ex.Message });
         }
     }
+
+    /// <summary>
+    /// The redirect_uri used for Google's token exchange must exactly match the one the
+    /// browser was actually sent to (which varies by frontend origin/environment). The client
+    /// reports the redirect_uri it used; we only trust it if its origin is on the configured
+    /// allow-list, otherwise we fall back to the static configured value.
+    /// </summary>
+    private string ResolveGoogleRedirectUri(string? clientRedirectUri)
+    {
+        var fallback = _configuration["Authentication:Google:RedirectUri"] ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(clientRedirectUri))
+            return fallback;
+
+        var allowedOrigins = _configuration.GetSection("Authentication:Google:AllowedRedirectOrigins").Get<string[]>() ?? Array.Empty<string>();
+        bool isAllowed = allowedOrigins.Any(origin =>
+            string.Equals(clientRedirectUri, $"{origin.TrimEnd('/')}/auth/callback", StringComparison.OrdinalIgnoreCase));
+
+        return isAllowed ? clientRedirectUri : fallback;
+    }
+
     [HttpPost("refresh")]
-    public async Task<IActionResult> Refresh([FromBody] RefreshRequestDto dto)
+    public async Task<IActionResult> Refresh([FromBody] RefreshRequestDto dto, CancellationToken ctoken = default)
     {
         if (!Request.Cookies.TryGetValue("refreshToken", out var clientToken))
             return Unauthorized(new { Message = "Refresh token cookie is missing." });
@@ -151,7 +153,29 @@ public class AuthController : ControllerBase
         var user = await _reglogService.FindUserByEmailAsync(dto.Email);
         if (user == null) return NotFound(new { Message = "User not found." });
 
+        // Скользящая сессия: пока юзер активен (браузер тихо рефрешит токен), продлеваем
+        // refresh-токен и cookie ещё на 30 дней. Значение токена то же — cookie переустанавливаем
+        // лишь ради нового Expires, чтобы окно отсчитывалось от активности, а не от логина.
+        await _reglogService.TouchSessionAsync(dto.Email, deviceId, clientToken, ctoken);
+        AppendRefreshTokenCookie(clientToken);
+
         return Ok(new { Token = _tokenService.GenerateToken(user) });
+    }
+
+    /// <summary>
+    /// Единая точка установки refresh-cookie (login / confirmregister / google / sliding refresh) —
+    /// HttpOnly + Secure + SameSite=None (нужно для кросс-схемного localhost http→https) и persistent
+    /// Expires на 30 дней, чтобы cookie переживала перезапуск браузера.
+    /// </summary>
+    private void AppendRefreshTokenCookie(string refreshToken)
+    {
+        Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+            Expires = DateTimeOffset.UtcNow.AddDays(30)
+        });
     }
     
     [HttpPost("logout")]

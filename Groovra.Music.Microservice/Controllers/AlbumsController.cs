@@ -1,4 +1,5 @@
-﻿using Groovra.Music.Microservice.DTOs;
+﻿using Groovra.Music.Microservice.Caching;
+using Groovra.Music.Microservice.DTOs;
 using Groovra.Music.Microservice.Result;
 using Groovra.Music.Microservice.Services;
 using Groovra.Shared.Constants;
@@ -19,12 +20,16 @@ public class AlbumsController : ControllerBase
     private readonly AlbumService _albumService;
     private readonly FavoritesService _favoritesService;
     private readonly UserNameGrpcService.UserNameGrpcServiceClient _grpcClient;
+    private readonly ICacheService _cache;
 
-    public AlbumsController(AlbumService albumService, FavoritesService favoritesService, UserNameGrpcService.UserNameGrpcServiceClient grpcClient)
+    public AlbumsController(
+        AlbumService albumService, FavoritesService favoritesService,
+        UserNameGrpcService.UserNameGrpcServiceClient grpcClient, ICacheService cache)
     {
         _albumService = albumService;
         _favoritesService = favoritesService;
         _grpcClient = grpcClient;
+        _cache = cache;
     }
     // GET music/albums
     [HttpGet]
@@ -32,33 +37,27 @@ public class AlbumsController : ControllerBase
     public async Task<IActionResult> GetAllAlbums(
         [FromQuery] string? search,
         [FromQuery] Guid? userId,
+        [FromQuery] string? genre,
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 10,
         CancellationToken cancellationToken = default)
     {
-       
+
         if (pageNumber < 1) pageNumber = 1;
         if (pageSize < 1) pageSize = 10;
         if (pageSize > 100) pageSize = 100;
 
-      
+
         HttpContext.TryGetUserId(out var currentUserId);
 
-    
+
         var likedIds = currentUserId != Guid.Empty
             ? await _favoritesService.GetLikedAlbumIdsAsync(currentUserId, cancellationToken)
             : new HashSet<Guid>();
 
-        // 4. Отримуємо список альбомів із сервісу
-        // Використовуємо готовий приватний метод GetBaseUrl() з AlbumsController
-        var (items, totalCount) = await _albumService.GetAlbumsAsync(
-            userId, 
-            search, 
-            likedIds, 
-            GetBaseUrl(), 
-            pageNumber, 
-            pageSize, 
-            cancellationToken);
+        // 4. Отримуємо список альбомів із сервісу (кеш-aside, IsLiked накладається окремо)
+        var (items, totalCount) = await GetAlbumsWithCacheAsync(
+            userId, search, genre, pageNumber, pageSize, likedIds, GetBaseUrl(), cancellationToken);
 
         // 5. Формуємо результат
         var result = new PagedResultDto<AlbumListItemDto>(items, totalCount, pageNumber, pageSize);
@@ -69,6 +68,7 @@ public class AlbumsController : ControllerBase
     [HttpGet("me")]
     public async Task<IActionResult> GetMyAlbums(
         [FromQuery] string? search,
+        [FromQuery] string? genre,
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
@@ -91,8 +91,8 @@ public class AlbumsController : ControllerBase
         var likedIds = await _favoritesService.GetLikedAlbumIdsAsync(currentUserId, cancellationToken);
 
         // 4. Вызываем твой готовый сервис, жестко передавая currentUserId в качестве фильтра
-        var (items, totalCount) = await _albumService.GetAlbumsAsync(
-            currentUserId, search, likedIds, GetBaseUrl(), pageNumber, pageSize, cancellationToken);
+        var (items, totalCount) = await GetAlbumsWithCacheAsync(
+            currentUserId, search, genre, pageNumber, pageSize, likedIds, GetBaseUrl(), cancellationToken);
 
         return Ok(new PagedResultDto<AlbumListItemDto>(items, totalCount, pageNumber, pageSize));
     }
@@ -262,8 +262,25 @@ public class AlbumsController : ControllerBase
 
         return Ok(new { message = "Альбом успішно відновлено." });
     }
-    
-    
+
+    // DELETE music/albums/{id}/permanent — остаточне видалення вже soft-deleted альбому
+    // (з кошика), не чекаючи 30-денної фонової очистки.
+    [HttpDelete("{id:guid}/permanent")]
+    public async Task<IActionResult> PermanentlyDeleteAlbum(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var currentUserId))
+            return Unauthorized(new { message = "Потрібна авторизація." });
+
+        var userRole = Request.Headers["X-User-Role"].ToString();
+
+        var result = await _albumService.PermanentlyDeleteAlbumAsync(id, currentUserId, userRole, cancellationToken);
+        if (!result.Success)
+            return BadRequest(new { message = result.ErrorMessage });
+
+        return Ok(new { message = "Альбом остаточно видалено." });
+    }
+
+
     // DELETE music/albums/{id}
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DeleteAlbum(Guid id, CancellationToken cancellationToken)
@@ -394,4 +411,36 @@ public class AlbumsController : ControllerBase
 
     private bool TryGetUserId(out Guid userId) => HttpContext.TryGetUserId(out userId);
     private string GetBaseUrl() => $"{Request.Scheme}://{Request.Host}";
+
+    /// <summary>Cache-aside для GetAllAlbums/GetMyAlbums. Кеш будується БЕЗ likedAlbumIds
+    /// (щоб не запекти лайки одного користувача в спільний кеш), IsLiked накладається на
+    /// результат — з кеша чи щойно з БД — уже після читання, для поточного запиту.</summary>
+    private async Task<(IReadOnlyList<AlbumListItemDto> Items, int TotalCount)> GetAlbumsWithCacheAsync(
+        Guid? artistUserId, string? search, string? genre, int pageNumber, int pageSize,
+        HashSet<Guid> likedAlbumIds, string baseUrl, CancellationToken cancellationToken)
+    {
+        var key = CacheKeys.AlbumsSearch(search, artistUserId, genre, pageNumber, pageSize);
+        var cached = await _cache.GetAsync<CachedPage<AlbumListItemDto>>(key, cancellationToken);
+
+        IReadOnlyList<AlbumListItemDto> items;
+        int totalCount;
+        if (cached is not null)
+        {
+            items = cached.Items;
+            totalCount = cached.TotalCount;
+        }
+        else
+        {
+            (items, totalCount) = await _albumService.GetAlbumsAsync(
+                artistUserId, search, likedAlbumIds: [], baseUrl, genre, pageNumber, pageSize, cancellationToken);
+            await _cache.SetAsync(
+                key, new CachedPage<AlbumListItemDto> { Items = items.ToList(), TotalCount = totalCount },
+                TimeSpan.FromMinutes(5), cancellationToken);
+        }
+
+        foreach (var item in items)
+            item.IsLiked = likedAlbumIds.Contains(item.Id);
+
+        return (items, totalCount);
+    }
 }

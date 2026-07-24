@@ -51,5 +51,8 @@
       <Link>.dockerignore</Link>
     </Content>
   </ItemGroup>
+  <ItemGroup>
+    <None Remove="MediaStorage\covers\aa6cc58c-302e-4e2c-a3af-8550cee4cd79_cover.png" />
+  </ItemGroup>
 
 </Project>

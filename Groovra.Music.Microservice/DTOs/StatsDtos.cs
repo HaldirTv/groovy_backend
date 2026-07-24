@@ -19,3 +19,11 @@ public class TopTrackDto
     public long PlayCount { get; set; }
     public string? CoverImageUrl { get; set; }
 }
+
+public class GlobalStatsDto
+{
+    public int AiMixesCount { get; set; }
+    public int SongsCount { get; set; }
+    public int AlbumsCount { get; set; }
+    public int HoursListened { get; set; }
+}

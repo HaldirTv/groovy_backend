@@ -1,0 +1,74 @@
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 8458fd3..09ae896 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -38,6 +38,7 @@ services:
+       - Email__Password=${MAIL_PASS}
+       - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
+       - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
++      - Authentication__Google__RedirectUri=https://groovra-frontend.vercel.app/auth/callback
+     depends_on:
+       - rabbitmq
+       - redis
+@@ -57,7 +58,7 @@ services:
+       - RabbitMQ__Host=rabbitmq
+       - RabbitMQ__Username=guest
+       - RabbitMQ__Password=guest
+-      - AuthGrpcUrl=http://auth-service:8080
++      - AuthGrpcUrl=http://auth-service:8081
+       - JamendoApi__BaseUrl=https://api.jamendo.com/v3.0
+       - JamendoApi__ClientId=16efb5ab
+       - MediaStorage__BasePath=/app/media
+@@ -81,7 +82,7 @@ services:
+       - RabbitMQ__Host=rabbitmq
+       - RabbitMQ__Username=guest
+       - RabbitMQ__Password=guest
+-      - MusicGrpcUrl=http://music-service:8080
++      - MusicGrpcUrl=http://music-service:8081
+     depends_on:
+       - rabbitmq
+       - music-service
+@@ -91,8 +92,6 @@ services:
+       context: .
+       dockerfile: Groovra.ApiGateway/Dockerfile
+     container_name: groovra-gateway
+-    ports:
+-      - "80:8080"
+     restart: always
+     environment:
+       - ASPNETCORE_ENVIRONMENT=Production
+@@ -100,6 +99,9 @@ services:
+       - Jwt__Key=${JWT_SECRET_KEY}
+       - Jwt__Issuer=groovra.local
+       - Jwt__Audience=groovra.clients
++      - Cors__AllowedOrigins__0=http://localhost:5178
++      - Cors__AllowedOrigins__1=https://groovra-frontend-9wtp.vercel.app
++      # Обрати внимание на точное совпадение с именами кластеров из appsettings.json и порты :8080
+       - ReverseProxy__Clusters__auth-cluster__Destinations__auth-destination__Address=http://auth-service:8080
+       - ReverseProxy__Clusters__music-cluster__Destinations__music-destination__Address=http://music-service:8080
+       - ReverseProxy__Clusters__history-cluster__Destinations__history-destination__Address=http://history-service:8080
+@@ -108,5 +110,21 @@ services:
+       - music-service
+       - history-service
+ 
++  caddy:
++    image: caddy:alpine
++    container_name: groovra-caddy
++    restart: unless-stopped
++    ports:
++      - "80:80"
++      - "443:443"
++    volumes:
++      - ./Caddyfile:/etc/caddy/Caddyfile
++      - caddy_data:/data
++      - caddy_config:/config
++    depends_on:
++      - gateway
++
+ volumes:
+-  groovra-media-volume:
+\ No newline at end of file
++  groovra-media-volume:
++  caddy_data:
++  caddy_config:
+\ No newline at end of file

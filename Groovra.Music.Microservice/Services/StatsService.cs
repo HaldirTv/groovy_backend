@@ -58,4 +58,27 @@ public class StatsService
 
         return ServiceResult<ArtistStatsDto>.Ok(stats);
     }
+
+    public async Task<ServiceResult<GlobalStatsDto>> GetGlobalStatsAsync(CancellationToken cancellationToken = default)
+    {
+        var aiMixesCount = await _db.Playlists
+            .Where(p => p.Slug != null && p.Slug.Contains("ai-mix"))
+            .CountAsync(cancellationToken);
+
+        var songsCount = await _db.Tracks.CountAsync(cancellationToken);
+        var albumsCount = await _db.Albums.CountAsync(cancellationToken);
+
+        var totalSecondsListened = await _db.Tracks
+            .SumAsync(t => (long)t.DurationSeconds * t.PlayCount, cancellationToken);
+
+        var stats = new GlobalStatsDto
+        {
+            AiMixesCount = aiMixesCount,
+            SongsCount = songsCount,
+            AlbumsCount = albumsCount,
+            HoursListened = (int)(totalSecondsListened / 3600),
+        };
+
+        return ServiceResult<GlobalStatsDto>.Ok(stats);
+    }
 }

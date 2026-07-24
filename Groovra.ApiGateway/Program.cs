@@ -1,13 +1,44 @@
 using System.Net;
 using System.Security.Claims;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using Yarp.ReverseProxy.Transforms;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Дефолтный лимит Kestrel (~28.6 MB) меньше, чем лимит аплоада треков на Music-сервисе
+// (220 MB) — без этого большие файлы будут падать на уровне шлюза, не долетая до сервиса.
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = 220_000_000; // 220 MB
+});
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("IpBasedLimiter", context =>
+    {
+        var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        return RateLimitPartition.GetFixedWindowLimiter(remoteIp, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 100,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        });
+    });
+
+    options.OnRejected = async (context, token) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.HttpContext.Response.ContentType = "application/json; charset=utf-8";
+        await context.HttpContext.Response.WriteAsync("{\"error\": \"Too many requests. Please try again later.\"}", token);
+    };
+});
 
 // === 1. РЕГИСТРАЦИЯ YARP ===
 builder.Services.AddReverseProxy()
@@ -58,7 +89,18 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:5178", "https://localhost:7005") // Добавили адрес Gateway!
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                             ?? new[] { "http://localhost:5178" }; // дефолт, если ничего не передали
+
+        // Vercel даёт каждому preview-деплою уникальный URL вида
+        // groovra-frontend-9wtp-<hash>-berserklegends-projects.vercel.app —
+        // ловим их regex'ом, чтобы не редактировать AllowedOrigins после каждого деплоя.
+        var vercelPreviewPattern = new Regex(
+            @"^https://groovra-frontend-9wtp-[a-z0-9]+-berserklegends-projects\.vercel\.app$",
+            RegexOptions.IgnoreCase);
+
+        policy.SetIsOriginAllowed(origin =>
+                allowedOrigins.Contains(origin) || vercelPreviewPattern.IsMatch(origin))
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -101,13 +143,43 @@ builder.Services.AddAuthentication(options =>
             ValidAudience = jwtAudience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
         };
+
+        // SignalR-з'єднання (ChatHub) апгрейдяться у сирий WebSocket, а браузерний
+        // WebSocket API не вміє виставляти заголовок Authorization — клієнт передає
+        // токен через query-string (?access_token=...), тому тут його явно підхоплюємо
+        // і кладемо туди, де його чекає стандартна JWT-валідація. Діє лише для /chat/hub,
+        // щоб не змінювати поведінку решти маршрутів.
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/chat/hub"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 
 var app = builder.Build();
 
 // === 4. НАСТРОЙКА КОНВЕЙЕРА ЗАПРОСОВ ===
+// Шлюз стоит за Caddy (reverse proxy в docker-сети) — без этого RemoteIpAddress
+// всегда будет IP-адресом Caddy, и IpBasedLimiter схлопнется в общий лимит на всех.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+forwardedHeadersOptions.KnownIPNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
 
+app.UseRouting();
 app.UseCors();
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -121,8 +193,9 @@ app.MapScalarApiReference("/scalar/v1", options =>
     // Мы говорим Scalar-у тянуть JSON по этому адресу,
     // а YARP перехватит этот запрос и отправит его в Auth-микросервис.
     options.AddDocument("auth", "Auth Service", "/docs/auth/openapi.json", isDefault: true)
-        .AddDocument("music", "Music Service", "docs/music/openapi.json")
-        .AddDocument("history", "History Service", "/docs/history/openapi.json");
+        .AddDocument("music", "Music Service", "/docs/music/openapi.json")
+        .AddDocument("history", "History Service", "/docs/history/openapi.json")
+        .AddDocument("chat", "Chat Service", "/docs/chat/openapi.json");
 });
 
 // === 6. ЗАПУСК ШЛЮЗА YARP ===

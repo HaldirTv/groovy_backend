@@ -1,0 +1,14 @@
+diff --git a/Groovra.History.Microservice/Program.cs b/Groovra.History.Microservice/Program.cs
+index dfe9262..b3d1b36 100644
+--- a/Groovra.History.Microservice/Program.cs
++++ b/Groovra.History.Microservice/Program.cs
+@@ -8,6 +8,9 @@ using Microsoft.EntityFrameworkCore;
+ using Microsoft.OpenApi;
+ using Scalar.AspNetCore;
+ 
++// gRPC client requires this to call the Music service over plain HTTP/2 (h2c) in Docker — without it every call throws.
++AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
++
+ var builder = WebApplication.CreateBuilder(args);
+ 
+ // 1. Контроллеры и OpenApi документация

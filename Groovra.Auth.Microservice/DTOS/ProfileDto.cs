@@ -15,6 +15,8 @@ public class ProfileResponseDto
     public string LinkUrl { get; set; } = string.Empty;
     public string LinkLabel { get; set; } = string.Empty;
     public string SupportLink { get; set; } = string.Empty;
+    public string SettingsJson { get; set; } = string.Empty;
+    public DateTime? CreatedAt { get; set; }
 }
 
 public class UpdateProfileDto
@@ -31,6 +33,7 @@ public class UpdateProfileDto
     public string? LinkUrl { get; set; }
     public string? LinkLabel { get; set; }
     public string? SupportLink { get; set; }
+    public string? SettingsJson { get; set; }
 }
 
 

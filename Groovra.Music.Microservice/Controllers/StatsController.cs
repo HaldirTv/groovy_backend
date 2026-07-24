@@ -41,4 +41,15 @@ public class StatsController : ControllerBase
 
         return Ok(result.Data);
     }
+
+    // GET music/stats/global — публично доступно (гостям тоже)
+    [HttpGet("global")]
+    public async Task<IActionResult> GetGlobalStats(CancellationToken cancellationToken)
+    {
+        var result = await _statsService.GetGlobalStatsAsync(cancellationToken);
+        if (!result.Success)
+            return BadRequest(new { message = result.ErrorMessage });
+
+        return Ok(result.Data);
+    }
 }

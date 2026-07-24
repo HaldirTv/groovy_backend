@@ -65,6 +65,7 @@ public class AlbumDto
     public double TotalDurationSeconds { get; set; }
     public DateTime CreatedAt { get; set; }
     public bool IsLiked { get; set; }
+    public List<string> CollageCovers { get; set; } = new();
     public List<AlbumTrackItemDto> Tracks { get; set; } = new();
 }
 
@@ -78,4 +79,5 @@ public class AlbumListItemDto
     public double TotalDurationSeconds { get; set; }
     public DateOnly? ReleaseDate { get; set; }
     public bool IsLiked { get; set; }
+    public List<string> CollageCovers { get; set; } = new();
 }

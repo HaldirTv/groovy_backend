@@ -7,6 +7,7 @@ using Groovra.Shared.Constants;
 using Groovra.Shared.ServiceResult;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Hosting;
 
 namespace Groovra.Auth.Microservice.Services;
 
@@ -14,15 +15,17 @@ public class ReglogService
 {
     private readonly AuthDbContext _context;
     private readonly TokenService _tokenService;
-    private readonly EmailService _emailService;
+    private readonly IEmailSender _emailService;
     private readonly IDistributedCache _cache;
+    private readonly IHostEnvironment _environment;
 
-    public ReglogService(AuthDbContext context, TokenService tokenService, EmailService emailService, IDistributedCache cache)
+    public ReglogService(AuthDbContext context, TokenService tokenService, IEmailSender emailService, IDistributedCache cache, IHostEnvironment environment)
     {
-        _context = context; 
+        _context = context;
         _tokenService = tokenService;
         _emailService = emailService;
         _cache = cache;
+        _environment = environment;
     }
     //Register/Login
     public async Task<ServiceResult<bool>> RegisterUnVerifiedAsync(RegisterDto registerUserDto, CancellationToken token = default)
@@ -45,12 +48,19 @@ public class ReglogService
         }
         
         int code = Random.Shared.Next(100000, 999999);
+
+        // Дублюємо код у консоль лише в Development — щоб не лізти в Redis/поштову
+        // скриньку вручну під час локальної розробки, коли реальний email не потрібен.
+        if (_environment.IsDevelopment())
+        {
+            Console.WriteLine($"[REGISTRATION CODE] {registerUserDto.Email}: {code}");
+        }
+
         var pendingUser = new PendingUserCacheDto()
         {
             Username = registerUserDto.Username,
             Email = registerUserDto.Email,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(registerUserDto.Password),
-            Role = registerUserDto.Role,
             ConfirmationCode = code.ToString()
         };
         
@@ -59,7 +69,7 @@ public class ReglogService
         
         try
         {
-            await _emailService.sendEmailAsync(BodyContent: body, Subject: subject, ToAddress: registerUserDto.Email);
+            await _emailService.SendEmailAsync(BodyContent: body, Subject: subject, ToAddress: registerUserDto.Email);
         }
         catch (Exception ex)
         {
@@ -103,49 +113,87 @@ public class ReglogService
             return ServiceResult<User>.Fail("Invalid confirmation code");
         }
     
-        bool isArtist = string.Equals(pendingUser.Role, AppRoles.Artist, StringComparison.OrdinalIgnoreCase);;
-        List<Role> roles = new();
-    
-        if (isArtist)
-        {
-            Role? artistRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == AppRoles.Artist, token);
-            if (artistRole != null) roles.Add(artistRole);
-        }
-    
+        // Basic registration always grants the Listener role only — Artist is granted later,
+        // exclusively via AssignArtistRoleAsync (an Admin-only action).
         Role? listenerRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == AppRoles.Listener, token);
-        if (listenerRole != null) roles.Add(listenerRole);
-        
+
         var user = new User
         {
             Username = pendingUser.Username,
             Email = pendingUser.Email,
             PasswordHash = pendingUser.PasswordHash
         };
-    
-        user.Roles.AddRange(roles);
-    
-        if (isArtist)
-        {
-            user.ArtistProfile = new Artist
-            {
-                UserId = user.Id,
-                Bio = "This is the artist's bio.",
-                AvatarUrl = "https://as2.ftcdn.net/v2/jpg/00/64/67/63/1000_F_64676383_LdbmhiNM6Ypzb3FM4PPuFP9rHe7ri8Ju.jpg",
-                BannerUrl = string.Empty
-            };
-        }
-    
+
+        if (listenerRole != null) user.Roles.Add(listenerRole);
+
         _context.Users.Add(user);
-        user.Profile = new Profile
+        AttachListenerProfile(_context, user);
+        await _context.SaveChangesAsync(token);
+
+        await _cache.RemoveAsync(pendingKey, token);
+
+        return ServiceResult<User>.Ok(user);
+    }
+
+    /// <summary>Grants the Artist role to an existing user and creates their Artist profile if missing (idempotent).</summary>
+    public async Task<ServiceResult<User>> AssignArtistRoleAsync(Guid userId, CancellationToken token = default)
+    {
+        var user = await _context.Users
+            .Include(u => u.Roles)
+            .Include(u => u.ArtistProfile)
+            .Include(u => u.Profile)
+            .FirstOrDefaultAsync(u => u.Id == userId, token);
+
+        if (user == null) return ServiceResult<User>.Fail("User not found.");
+
+        if (!user.Roles.Any(r => r.Name == AppRoles.Artist))
+        {
+            Role? artistRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == AppRoles.Artist, token);
+            if (artistRole == null) return ServiceResult<User>.Fail("Artist role is not configured.");
+            user.Roles.Add(artistRole);
+        }
+
+        if (user.ArtistProfile == null)
+        {
+            AttachArtistProfile(_context, user);
+        }
+
+        if (user.Profile is not null && user.Profile.ArtistApplicationStatus == "Pending")
+        {
+            user.Profile.ArtistApplicationStatus = "Approved";
+        }
+
+        await _context.SaveChangesAsync(token);
+        return ServiceResult<User>.Ok(user);
+    }
+
+    private static void AttachListenerProfile(AuthDbContext context, User user)
+    {
+        var profile = new Profile
         {
             UserId = user.Id,
             DisplayName = user.Username
         };
-        await _context.SaveChangesAsync(token);
-        
-        await _cache.RemoveAsync(pendingKey, token);
-        
-        return ServiceResult<User>.Ok(user);
+        // Explicit Add() is required here: Artist/Profile have client-generated (non-default)
+        // Guid keys, so when `user` is an already-tracked entity (not itself being Add()-ed in
+        // this call), EF's navigation-fixup alone won't mark a pre-keyed new entity as Added —
+        // it assumes a non-default key means the row already exists and emits an UPDATE instead
+        // of an INSERT, which then fails with a 0-rows-affected concurrency exception.
+        context.Profiles.Add(profile);
+        user.Profile = profile;
+    }
+
+    private static void AttachArtistProfile(AuthDbContext context, User user)
+    {
+        var artist = new Artist
+        {
+            UserId = user.Id,
+            Bio = "This is the artist's bio.",
+            AvatarUrl = "https://as2.ftcdn.net/v2/jpg/00/64/67/63/1000_F_64676383_LdbmhiNM6Ypzb3FM4PPuFP9rHe7ri8Ju.jpg",
+            BannerUrl = string.Empty
+        };
+        context.Artists.Add(artist);
+        user.ArtistProfile = artist;
     }
 
     public async Task<ServiceResult<User>> ValidateUserForLoginAsync(LoginDto loginUser, CancellationToken token = default)
@@ -192,13 +240,8 @@ public class ReglogService
             user.Roles.Add(listenerRole);
         }
 
-        user.Profile = new Profile
-        {
-            UserId = user.Id,
-            DisplayName = user.Username
-        };
-
         _context.Users.Add(user);
+        AttachListenerProfile(_context, user);
         await _context.SaveChangesAsync(token);
 
         return ServiceResult<User>.Ok(user);
@@ -290,7 +333,7 @@ public class ReglogService
         try
         {
             // Исправлено: используем локальные BodyContent и Subject, а также email переданного юзера
-            await _emailService.sendEmailAsync(BodyContent: BodyContent, Subject: Subject, ToAddress: user.Email);
+            await _emailService.SendEmailAsync(BodyContent: BodyContent, Subject: Subject, ToAddress: user.Email);
         }
         catch (Exception ex)
         {
@@ -359,7 +402,22 @@ public class ReglogService
 
         return refreshToken;
     }
-    
+
+    /// <summary>
+    /// Продлевает жизнь существующей сессии на свежие 30 дней БЕЗ смены значения токена
+    /// (скользящее окно, без ротации — чтобы не ловить гонки с single-flight refresh на фронте).
+    /// Вызывается из /auth/refresh: пока пользователь активен, сессия не протухает по абсолютному
+    /// сроку от момента логина. Значение токена не меняем, поэтому cookie на клиенте остаётся тем же.
+    /// </summary>
+    public async Task TouchSessionAsync(string email, string deviceId, string refreshToken, CancellationToken token = default)
+    {
+        string cacheKey = $"refresh:{email}:{deviceId}";
+        await _cache.SetStringAsync(cacheKey, refreshToken, new DistributedCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(30)
+        }, token);
+    }
+
     public async Task<List<string>> GetActiveSessionsAsync(string email, CancellationToken ctoken = default)
     {
         string devicesKey = $"user_devices:{email}";

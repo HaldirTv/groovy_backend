@@ -20,19 +20,26 @@ public class LibraryController : ControllerBase
     }
 
     [HttpGet]
-    [ProducesResponseType(typeof(IReadOnlyList<TrackDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResultDto<TrackDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> GetLibrary(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetLibrary(
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 10,
+        CancellationToken cancellationToken = default)
     {
         if (!HttpContext.TryGetUserId(out var userId))
             return Unauthorized(new { Error = "Потрібна авторизація." });
+
+        if (pageNumber < 1) pageNumber = 1;
+        if (pageSize < 1) pageSize = 10;
+        if (pageSize > 100) pageSize = 100;
 
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
         try
         {
-            var tracks = await _libraryService.GetUserLibraryAsync(userId, baseUrl, cancellationToken);
-            return Ok(tracks);
+            var (items, totalCount) = await _libraryService.GetUserLibraryAsync(userId, baseUrl, pageNumber, pageSize, cancellationToken);
+            return Ok(new PagedResultDto<TrackDto>(items, totalCount, pageNumber, pageSize));
         }
         catch (Exception ex)
         {

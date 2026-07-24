@@ -48,7 +48,16 @@ public class  ProfileController : ControllerBase
 
         if (profile is null)
             return Ok(new ProfileResponseDto());
-        return Ok(profile);
+
+        // Скалярна проекція CreatedAt замість .Include(p => p.User) — щоб не тягнути
+        // весь граф User (і не наштовхнутись на циклічне посилання User.Profile <-> Profile.User
+        // при серіалізації, System.Text.Json на цьому впаде).
+        var createdAt = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => (DateTime?)u.CreatedAt)
+            .FirstOrDefaultAsync(ctoken);
+
+        return Ok(MapToDto(profile, createdAt));
     }
 
     [HttpPut]
@@ -71,10 +80,17 @@ public class  ProfileController : ControllerBase
         if (dto.LinkUrl is not null) profile.LinkUrl = dto.LinkUrl.Trim();
         if (dto.LinkLabel is not null) profile.LinkLabel = dto.LinkLabel.Trim();
         if (dto.SupportLink is not null) profile.SupportLink = dto.SupportLink.Trim();
+        if (dto.SettingsJson is not null) profile.SettingsJson = dto.SettingsJson;
 
         profile.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ctoken);
-        return Ok(MapToDto(profile));
+
+        var createdAt = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => (DateTime?)u.CreatedAt)
+            .FirstOrDefaultAsync(ctoken);
+
+        return Ok(MapToDto(profile, createdAt));
     }
 
     [HttpPost("avatar")]
@@ -205,7 +221,7 @@ public class  ProfileController : ControllerBase
         System.IO.File.Move(tempPath, destinationPath, overwrite: true);
     }
 
-    private static ProfileResponseDto MapToDto(Profile p) => new()
+    private static ProfileResponseDto MapToDto(Profile p, DateTime? createdAt = null) => new()
     {
         DisplayName = p.DisplayName,
         FirstName = p.FirstName,
@@ -220,7 +236,9 @@ public class  ProfileController : ControllerBase
         BannerUrl = p.BannerUrl,
         LinkUrl = p.LinkUrl,
         LinkLabel = p.LinkLabel,
-        SupportLink = p.SupportLink
+        SupportLink = p.SupportLink,
+        SettingsJson = p.SettingsJson,
+        CreatedAt = createdAt
     };
 }
 

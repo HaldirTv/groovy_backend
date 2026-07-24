@@ -15,6 +15,8 @@ public class MusicDbContext : DbContext
     public DbSet<FavoriteAlbum> FavoriteAlbums { get; set; }
     public DbSet<FavoritePlaylist> FavoritePlaylists { get; set; }
     public DbSet<Download> Downloads { get; set; }
+    public DbSet<TrackComment> TrackComments { get; set; }
+    public DbSet<TrackCommentLike> TrackCommentLikes { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -27,6 +29,7 @@ public class MusicDbContext : DbContext
             entity.Property(t => t.ArtistName).IsRequired().HasMaxLength(256);
             entity.Property(t => t.AlbumTitle).HasMaxLength(256);
             entity.Property(t => t.Genre).HasMaxLength(128);
+            entity.Property(t => t.Mood).HasMaxLength(64);
             entity.Property(t => t.ContentType).HasMaxLength(128);
             
             entity.Property(t => t.AudioRelativePath).HasMaxLength(512); 
@@ -38,6 +41,26 @@ public class MusicDbContext : DbContext
             
             entity.Property(t => t.PlayCount).IsRequired().HasDefaultValue(0L);
             entity.HasQueryFilter(t => !t.IsDeleted);
+
+            // Без цього індексу кожен запит "ORDER BY PlayCount DESC" (популярне/рекомендації/
+            // повний список) робить full scan + явний SORT на всій таблиці. На невеликій БД
+            // (кілька треків) це непомітно, але після масового імпорту (сотні треків) SQL Server
+            // просить memory grant під сортування і під конкурентним навантаженням чекає в черзі
+            // (RESOURCE_SEMAPHORE) — саме це спричиняло зависання /music/tracks/recommendations
+            // та сусідніх ендпоінтів.
+            //
+            // ПРИМІТКА: ідеально було б зробити цей індекс покривним (INCLUDE усіх колонок,
+            // які реально вибираються) — тоді для SELECT * теж не знадобився б жоден memory
+            // grant. Пробували; на цій машині (SQL Server зараз бачить лише ~150-300MB вільної
+            // фізичної пам'яті — сторонні процеси розробника з'їдають решту) сама операція
+            // ALTER/CREATE INDEX WITH INCLUDE стабільно не встигає за 30с і застрягала в
+            // нескінченному retry-циклі при старті додатку. Тому зараз — простий (не покривний)
+            // індекс, який ГАРАНТОВАНО застосовується і все одно суттєво прискорює прості
+            // "ORDER BY PlayCount" запити без додаткових WHERE-фільтрів. Якщо в майбутньому
+            // з'явиться вільна пам'ять на сервері БД, варто повернутись до покривної версії.
+            entity.HasIndex(t => new { t.IsDeleted, t.PlayCount })
+                .IsDescending(false, true)
+                .HasDatabaseName("IX_Tracks_IsDeleted_PlayCount");
         });
         
         modelBuilder.Entity<Playlist>(b =>
@@ -109,13 +132,44 @@ public class MusicDbContext : DbContext
         {
             b.ToTable("FavoritePlaylists", "music");
             b.HasKey(fp => new { fp.UserId, fp.PlaylistId });
-            
+
             b.HasOne(fp => fp.Playlist)
                 .WithMany()
                 .HasForeignKey(fp => fp.PlaylistId)
                 .OnDelete(DeleteBehavior.Cascade); // Лайк исчезает, если плейлист удален физически
         });
-        
-        
+
+        modelBuilder.Entity<Download>(b =>
+        {
+            // The Type column is nvarchar(450) (see AddDownloads migration); without this
+            // conversion EF defaults to storing/reading the enum as its numeric ordinal,
+            // which doesn't match the string column and throws on read.
+            b.Property(d => d.Type).HasConversion<string>();
+        });
+
+        modelBuilder.Entity<TrackComment>(b =>
+        {
+            b.ToTable("TrackComments", "music");
+            b.HasKey(c => c.Id);
+            b.Property(c => c.AuthorName).HasMaxLength(256);
+            b.Property(c => c.Text).IsRequired().HasMaxLength(2000);
+            b.HasIndex(c => c.TrackId);
+            b.HasOne(c => c.Track)
+                .WithMany()
+                .HasForeignKey(c => c.TrackId)
+                .OnDelete(DeleteBehavior.Cascade); // комментарии удаляются вместе с треком
+            b.HasQueryFilter(c => !c.IsDeleted);
+        });
+
+        modelBuilder.Entity<TrackCommentLike>(b =>
+        {
+            b.ToTable("TrackCommentLikes", "music");
+            b.HasKey(cl => cl.Id);
+            b.HasIndex(cl => new { cl.CommentId, cl.UserId }).IsUnique();
+            b.HasOne(cl => cl.Comment)
+                .WithMany()
+                .HasForeignKey(cl => cl.CommentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 }

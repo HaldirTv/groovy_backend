@@ -19,6 +19,4 @@ public class RegisterDto
     [Required(ErrorMessage = "Пароль обязателен.")]
     [Length(8, 64, ErrorMessage = "Пароль должен быть от 8 до 64 символов.")]
     public string Password { get; set; } = string.Empty;
-    
-    public string? Role { get; set; } = "Listener";
 }
