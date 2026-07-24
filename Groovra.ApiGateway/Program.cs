@@ -93,10 +93,11 @@ builder.Services.AddCors(options =>
                              ?? new[] { "http://localhost:5178" }; // дефолт, если ничего не передали
 
         // Vercel даёт каждому preview-деплою уникальный URL вида
-        // groovra-frontend-9wtp-<hash>-berserklegends-projects.vercel.app —
-        // ловим их regex'ом, чтобы не редактировать AllowedOrigins после каждого деплоя.
+        // groovra-frontend-<hash>-berserklegends-projects.vercel.app — хэш меняется
+        // при каждом деплое (не только "9wtp"), поэтому ловим его regex'ом, чтобы не
+        // редактировать AllowedOrigins после каждого деплоя.
         var vercelPreviewPattern = new Regex(
-            @"^https://groovra-frontend-9wtp-[a-z0-9]+-berserklegends-projects\.vercel\.app$",
+            @"^https://groovra-frontend-[a-z0-9]+-berserklegends-projects\.vercel\.app$",
             RegexOptions.IgnoreCase);
 
         policy.SetIsOriginAllowed(origin =>
