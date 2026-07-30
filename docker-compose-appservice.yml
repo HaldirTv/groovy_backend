@@ -1,0 +1,118 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    restart: always
+    networks:
+      - groovra-net
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: always
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    networks:
+      - groovra-net
+
+  auth-service:
+    image: acrgroovra.azurecr.io/groovra-auth:latest
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - Redis__ConnectionString=redis:6379
+      - RabbitMQ__Host=rabbitmq
+      - RabbitMQ__Username=guest
+      - RabbitMQ__Password=guest
+      - Jwt__Key=${JWT_SECRET_KEY}
+      - Email__Host=sandbox.smtp.mailtrap.io
+      - Email__Port=2525
+      - Email__Username=${MAIL_USER}
+      - Email__Password=${MAIL_PASS}
+      - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
+      - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
+    depends_on:
+      - rabbitmq
+      - redis
+    networks:
+      - groovra-net
+
+  music-service:
+    image: acrgroovra.azurecr.io/groovra-music:latest
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - AllowedHosts=*
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - Redis__ConnectionString=redis:6379
+      - RabbitMQ__Host=rabbitmq
+      - RabbitMQ__Username=guest
+      - RabbitMQ__Password=guest
+      - AuthGrpcUrl=http://auth-service:8080
+      - JamendoApi__BaseUrl=https://api.jamendo.com/v3.0
+      - JamendoApi__ClientId=16efb5ab
+    depends_on:
+      - rabbitmq
+      - redis
+      - auth-service
+    networks:
+      - groovra-net
+
+  history-service:
+    image: acrgroovra.azurecr.io/groovra-history:latest
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - RabbitMQ__Host=rabbitmq
+      - RabbitMQ__Username=guest
+      - RabbitMQ__Password=guest
+      - MusicGrpcUrl=http://music-service:8080
+    depends_on:
+      - rabbitmq
+      - music-service
+    networks:
+      - groovra-net
+
+  billing-service:
+    image: acrgroovra.azurecr.io/groovra-billing:latest
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+    networks:
+      - groovra-net
+
+  gateway:
+    image: acrgroovra.azurecr.io/groovra-gateway:latest
+    restart: always
+    ports:
+      - "80:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - Jwt__Key=${JWT_SECRET_KEY}
+      - Jwt__Issuer=groovra.local
+      - Jwt__Audience=groovra.clients
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+      - ReverseProxy__Clusters__auth-cluster__Destinations__auth-destination__Address=http://auth-service:8080
+      - ReverseProxy__Clusters__music-cluster__Destinations__music-destination__Address=http://music-service:8080
+      - ReverseProxy__Clusters__history-cluster__Destinations__history-destination__Address=http://history-service:8080
+      - ReverseProxy__Clusters__billing-cluster__Destinations__billing-destination__Address=http://billing-service:8080
+    depends_on:
+      - auth-service
+      - music-service
+      - history-service
+      - billing-service
+    networks:
+      - groovra-net
+
+networks:
+  groovra-net:
+    driver: bridge

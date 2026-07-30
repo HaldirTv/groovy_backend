@@ -1,0 +1,6 @@
+@Groovra.History.Microservice_HostAddress = http://localhost:5204
+
+GET {{Groovra.History.Microservice_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

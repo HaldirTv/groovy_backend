@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+option csharp_namespace = "Groovra.Shared.Grpc";
+
+package username;
+
+service UserNameGrpcService {
+  rpc GetUserNameGrpc (UserNameGrpcRequest) returns (GetUserNameGrpcResponse);
+}
+
+message UserNameGrpcRequest {
+  string user_id = 1;
+}
+
+message GetUserNameGrpcResponse {
+  string username = 1;
+}

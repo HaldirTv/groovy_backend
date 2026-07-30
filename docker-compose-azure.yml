@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  auth-service:
+    image: acrgroovra.azurecr.io/groovra-auth:latest
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - Redis__ConnectionString=in-memory
+      - Jwt__Key=${JWT_SECRET_KEY}
+
+  music-service:
+    image: acrgroovra.azurecr.io/groovra-music:latest
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - AllowedHosts=*
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - Redis__ConnectionString=in-memory
+      - RabbitMQ__Host=none
+      - AuthGrpcUrl=http://auth-service:8080
+    depends_on:
+      - auth-service
+
+  history-service:
+    image: acrgroovra.azurecr.io/groovra-history:latest
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - RabbitMQ__Host=none
+      - MusicGrpcUrl=http://music-service:8080
+    depends_on:
+      - music-service
+
+  billing-service:
+    image: acrgroovra.azurecr.io/groovra-billing:latest
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+
+  gateway:
+    image: acrgroovra.azurecr.io/groovra-gateway:latest
+    restart: always
+    ports:
+      - "80:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - Jwt__Key=${JWT_SECRET_KEY}
+      - Jwt__Issuer=groovra.local
+      - Jwt__Audience=groovra.clients
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+      - ReverseProxy__Clusters__auth-cluster__Destinations__auth-destination__Address=http://auth-service:8080
+      - ReverseProxy__Clusters__music-cluster__Destinations__music-destination__Address=http://music-service:8080
+      - ReverseProxy__Clusters__history-cluster__Destinations__history-destination__Address=http://history-service:8080
+      - ReverseProxy__Clusters__billing-cluster__Destinations__billing-destination__Address=http://billing-service:8080
+    depends_on:
+      - auth-service
+      - music-service
+      - history-service
+      - billing-service

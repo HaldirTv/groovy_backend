@@ -1,0 +1,193 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    container_name: groovra-redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: groovra-rabbitmq
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: groovra-mssql
+    restart: always
+    ports:
+      - "1433:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=Groovra@2024!
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: Groovra.Auth.Microservice/Dockerfile
+    container_name: groovra-auth
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - Redis__ConnectionString=redis:6379
+      - RabbitMQ__Host=rabbitmq
+      - RabbitMQ__Username=guest
+      - RabbitMQ__Password=guest
+      - Jwt__Key=${JWT_SECRET_KEY}
+      - Email__Provider=Mailtrap
+      - Email__Mailtrap__Host=sandbox.smtp.mailtrap.io
+      - Email__Mailtrap__Port=2525
+      - Email__Mailtrap__Username=${MAIL_USER}
+      - Email__Mailtrap__Password=${MAIL_PASS}
+      - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
+      - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
+      - MediaStorage__BasePath=/app/MediaStorage
+    depends_on:
+      - rabbitmq
+      - redis
+      - mssql
+
+  music-service:
+    build:
+      context: .
+      dockerfile: Groovra.Music.Microservice/Dockerfile
+    container_name: groovra-music
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - AllowedHosts=*
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - Redis__ConnectionString=redis:6379
+      - RabbitMQ__Host=rabbitmq
+      - RabbitMQ__Username=guest
+      - RabbitMQ__Password=guest
+      - AuthGrpcUrl=http://auth-service:8080
+      - History__BaseUrl=http://history-service:8080
+      - JamendoApi__BaseUrl=https://api.jamendo.com/v3.0
+      - JamendoApi__ClientId=16efb5ab
+      - MediaStorage__BasePath=/app/media
+      - Billing__BaseUrl=http://billing-service:8080
+      - Gemini__ApiKey=${GEMINI_API_KEY}
+      - OpenModel__ApiKey=${OPENMODEL_API_KEY}
+    volumes:
+      - groovra-media-volume:/app/media
+    depends_on:
+      - rabbitmq
+      - redis
+      - auth-service
+      - mssql
+
+  billing-service:
+    build:
+      context: .
+      dockerfile: Groovra.Billing.Microservice/Dockerfile
+    container_name: groovra-billing
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - Stripe__SecretKey=${STRIPE_SECRET_KEY}
+      - Stripe__PublishableKey=${STRIPE_PUBLISHABLE_KEY}
+      - Stripe__WebhookSecret=${STRIPE_WEBHOOK_SECRET}
+
+  history-service:
+    build:
+      context: .
+      dockerfile: Groovra.History.Microservice/Dockerfile
+    container_name: groovra-history
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - RabbitMQ__Host=rabbitmq
+      - RabbitMQ__Username=guest
+      - RabbitMQ__Password=guest
+      - MusicGrpcUrl=http://music-service:8080
+    depends_on:
+      - rabbitmq
+      - music-service
+      - mssql
+
+  chat-service:
+    build:
+      context: .
+      dockerfile: Groovra.ChatService.Microservice/Dockerfile
+    container_name: groovra-chat
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - MusicGrpcUrl=http://music-service:8080
+      - AuthGrpcUrl=http://auth-service:8080
+      - RabbitMQ__Host=rabbitmq
+      - RabbitMQ__Username=guest
+      - RabbitMQ__Password=guest
+      - CloudflareR2__AccountId=${CLOUDFLARE_R2_ACCOUNT_ID}
+      - CloudflareR2__AccessKeyId=${CLOUDFLARE_R2_ACCESS_KEY_ID}
+      - CloudflareR2__SecretAccessKey=${CLOUDFLARE_R2_SECRET_ACCESS_KEY}
+      - CloudflareR2__BucketName=${CLOUDFLARE_R2_BUCKET_NAME}
+      - CloudflareR2__PublicUrl=${CLOUDFLARE_R2_PUBLIC_URL}
+      - CloudflareR2__ServiceUrl=${CLOUDFLARE_R2_SERVICE_URL}
+    depends_on:
+      - rabbitmq
+      - music-service
+      - auth-service
+      - mssql
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Groovra.ApiGateway/Dockerfile
+    container_name: groovra-gateway
+    ports:
+      - "80:8080"
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - Jwt__Key=${JWT_SECRET_KEY}
+      - Jwt__Issuer=groovra.local
+      - Jwt__Audience=groovra.clients
+      - Redis__ConnectionString=redis:6379
+      - ReverseProxy__Clusters__auth-cluster__Destinations__auth-destination__Address=http://auth-service:8080
+      - ReverseProxy__Clusters__music-cluster__Destinations__music-destination__Address=http://music-service:8080
+      - ReverseProxy__Clusters__history-cluster__Destinations__history-destination__Address=http://history-service:8080
+      - ReverseProxy__Clusters__chat-cluster__Destinations__chat-destination__Address=http://chat-service:8080
+      - ReverseProxy__Clusters__billing-cluster__Destinations__billing-destination__Address=http://billing-service:8080
+    depends_on:
+      - auth-service
+      - music-service
+      - history-service
+      - chat-service
+      - billing-service
+      - redis
+
+  frontend:
+    build:
+      context: ./groovy_frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_GATEWAY_URL=http://localhost
+        - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+    container_name: groovra-frontend
+    ports:
+      - "5178:80"
+    restart: always
+    depends_on:
+      - gateway
+
+volumes:
+  groovra-media-volume:
