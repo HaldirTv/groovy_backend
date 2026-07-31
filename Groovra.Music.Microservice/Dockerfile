@@ -21,7 +21,7 @@ ARG BUILD_CONFIGURATION=Release
 # це саме те, що забило диск і зламало білд. Контейнер завжди linux-x64, інше не потрібне.
 # Прибрано також окремий "dotnet build -o /app/build" крок - фінальний образ бере файли
 # лише з /app/publish, тож проміжний build дублював ту саму важку копію натівів даремно.
-RUN dotnet publish "./Groovra.Music.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/publish -r linux-x64 --self-contained false /p:UseAppHost=false
+RUN dotnet publish "./Groovra.Music.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/publish -r linux-x64 --self-contained false /p:UseAppHost=false /p:DebugType=none
 
 FROM base AS final
 WORKDIR /app

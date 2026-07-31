@@ -9,14 +9,13 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["Groovra.Auth.Microservice/Groovra.Auth.Microservice.csproj", "Groovra.Auth.Microservice/"]
 COPY ["Groovra.Shared/Groovra.Shared.csproj", "Groovra.Shared/"]
-RUN dotnet restore "Groovra.Auth.Microservice/Groovra.Auth.Microservice.csproj"
+RUN dotnet restore "Groovra.Auth.Microservice/Groovra.Auth.Microservice.csproj" -r linux-x64
 COPY . .
 WORKDIR "/src/Groovra.Auth.Microservice"
-RUN dotnet build "./Groovra.Auth.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./Groovra.Auth.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "./Groovra.Auth.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/publish -r linux-x64 --self-contained false /p:UseAppHost=false /p:DebugType=none
 
 FROM base AS final
 WORKDIR /app
