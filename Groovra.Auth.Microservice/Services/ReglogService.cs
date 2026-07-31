@@ -63,7 +63,7 @@ public class ReglogService
         string body = $"Ваш код підтвердження: {code}. Дійсний протягом 10 хвилин.";
         try
         {
-            await _emailService.SendEmailAsync(BodyContent: body, Subject: subject, ToAddress: registerUserDto.Email);
+            await _emailService.SendEmailAsync(BodyContent: body, Subject: subject, ToAddress: registerUserDto.Email, cancellationToken: token);
         }
         catch (Exception ex)
         {
@@ -309,7 +309,7 @@ public class ReglogService
         string Subject = "Сброс пароля в Groovra";
         try
         {
-            await _emailService.SendEmailAsync(BodyContent: BodyContent, Subject: Subject, ToAddress: user.Email);
+            await _emailService.SendEmailAsync(BodyContent: BodyContent, Subject: Subject, ToAddress: user.Email, cancellationToken: cancellationToken);
         }
         catch (Exception ex)
         {

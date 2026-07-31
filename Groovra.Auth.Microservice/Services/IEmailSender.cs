@@ -8,5 +8,6 @@ public interface IEmailSender
         string ToAddress = "support@groovra.com",
         string ToAdressTitle = "Groovra User",
         string Subject = "",
-        string BodyContent = "");
+        string BodyContent = "",
+        CancellationToken cancellationToken = default);
 }

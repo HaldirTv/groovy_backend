@@ -79,11 +79,25 @@ builder.Services.AddHttpClient("MusicService", client =>
 
 builder.Services.Configure<MailtrapOptions>(builder.Configuration.GetSection("Email:Mailtrap"));
 builder.Services.Configure<BrevoOptions>(builder.Configuration.GetSection("Email:Brevo"));
+builder.Services.Configure<BrevoApiOptions>(builder.Configuration.GetSection("Email:BrevoApi"));
+
+// Таймаут обов'язковий: надсилання листа відбувається всередині HTTP-запиту на /auth/register,
+// а YARP на гейтвеї віддає 504 вже через 100с. Будь-який транспорт пошти має впасти раніше.
+builder.Services.AddHttpClient(BrevoApiEmailService.HttpClientName, client =>
+{
+    var brevoApiBaseUrl = builder.Configuration["Email:BrevoApi:BaseUrl"] ?? "https://api.brevo.com";
+    client.BaseAddress = new Uri(brevoApiBaseUrl);
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
 
 var emailProvider = builder.Configuration["Email:Provider"];
 if (string.Equals(emailProvider, "Smtp", StringComparison.OrdinalIgnoreCase))
 {
     builder.Services.AddTransient<IEmailSender, SmtpEmailService>();
+}
+else if (string.Equals(emailProvider, "BrevoApi", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddTransient<IEmailSender, BrevoApiEmailService>();
 }
 else if (string.Equals(emailProvider, "Brevo", StringComparison.OrdinalIgnoreCase))
 {

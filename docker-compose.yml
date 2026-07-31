@@ -52,7 +52,13 @@ services:
       - RabbitMQ__Username=guest
       - RabbitMQ__Password=guest
       - Jwt__Key=${JWT_SECRET_KEY}
-      - Email__Provider=Brevo
+      # BrevoApi (HTTPS/443), а не Brevo (SMTP): DigitalOcean за замовчуванням мовчки дропає
+      # вихідні SMTP-порти, через що надсилання листа висло ~2хв і /auth/register падав у 504
+      # від гейтвею. SMTP-налаштування лишаються нижче - переключитись назад можна змінивши
+      # Email__Provider на Brevo (якщо відкриєте SMTP-порти в підтримці DigitalOcean).
+      - Email__Provider=${MAIL_PROVIDER:-BrevoApi}
+      - Email__BrevoApi__ApiKey=${BREVO_API_KEY}
+      - Email__BrevoApi__FromEmail=${MAIL_FROM}
       - Email__Brevo__Host=${MAIL_HOST}
       - Email__Brevo__Port=${MAIL_PORT}
       - Email__Brevo__Username=${MAIL_USER}
