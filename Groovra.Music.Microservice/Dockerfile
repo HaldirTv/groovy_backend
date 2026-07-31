@@ -10,14 +10,18 @@ WORKDIR /src
 COPY ["Groovra.Music.Microservice/Groovra.Music.Microservice.csproj", "Groovra.Music.Microservice/"]
 COPY ["Groovra.Shared/Groovra.Shared.csproj", "Groovra.Shared/"]
 COPY ["Groovra.Messaging/Groovra.Messaging.csproj", "Groovra.Messaging/"]
-RUN dotnet restore "Groovra.Music.Microservice/Groovra.Music.Microservice.csproj"
+RUN dotnet restore "Groovra.Music.Microservice/Groovra.Music.Microservice.csproj" -r linux-x64
 COPY . .
 WORKDIR "/src/Groovra.Music.Microservice"
-RUN dotnet build "./Groovra.Music.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./Groovra.Music.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+# -r linux-x64 --self-contained false: без цього Whisper.net.AllRuntimes копіює нативні
+# бібліотеки під ВСІ підтримувані рантайми (linux-arm64/arm/x64 і т.д.) - на 10GB дроплеті
+# це саме те, що забило диск і зламало білд. Контейнер завжди linux-x64, інше не потрібне.
+# Прибрано також окремий "dotnet build -o /app/build" крок - фінальний образ бере файли
+# лише з /app/publish, тож проміжний build дублював ту саму важку копію натівів даремно.
+RUN dotnet publish "./Groovra.Music.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/publish -r linux-x64 --self-contained false /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
