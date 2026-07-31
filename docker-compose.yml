@@ -34,11 +34,12 @@ services:
       - RabbitMQ__Username=guest
       - RabbitMQ__Password=guest
       - Jwt__Key=${JWT_SECRET_KEY}
-      - Email__Provider=Mailtrap
-      - Email__Mailtrap__Host=sandbox.smtp.mailtrap.io
-      - Email__Mailtrap__Port=2525
-      - Email__Mailtrap__Username=${MAIL_USER}
-      - Email__Mailtrap__Password=${MAIL_PASS}
+      - Email__Provider=Brevo
+      - Email__Brevo__Host=${MAIL_HOST}
+      - Email__Brevo__Port=${MAIL_PORT}
+      - Email__Brevo__Username=${MAIL_USER}
+      - Email__Brevo__Password=${MAIL_PASS}
+      - Email__Brevo__FromEmail=${MAIL_FROM}
       - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
       - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
       - Services__MusicServiceUrl=http://music-service:8080
