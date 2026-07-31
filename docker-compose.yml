@@ -181,20 +181,6 @@ services:
     depends_on:
       - gateway
 
-  frontend:
-    build:
-      context: ./groovy_frontend
-      dockerfile: Dockerfile
-      args:
-        - VITE_GATEWAY_URL=http://localhost
-        - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-    container_name: groovra-frontend
-    ports:
-      - "5178:80"
-    restart: always
-    depends_on:
-      - gateway
-
 volumes:
   groovra-media-volume:
   caddy_data:
