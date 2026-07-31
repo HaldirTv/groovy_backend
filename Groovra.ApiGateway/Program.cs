@@ -12,6 +12,8 @@ using Yarp.ReverseProxy.Transforms;
 
 var builder = WebApplication.CreateBuilder(args);
 
+Groovra.Shared.EnvValidation.RequireConfig(builder.Configuration, "Jwt:Key");
+
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -237,6 +239,8 @@ app.MapScalarApiReference("/scalar/v1", options =>
         .AddDocument("history", "History Service", "/docs/history/openapi.json")
         .AddDocument("chat", "Chat Service", "/docs/chat/openapi.json");
 });
+
+app.MapGet("/health", () => Results.Ok()).AllowAnonymous();
 
 app.MapReverseProxy();
 

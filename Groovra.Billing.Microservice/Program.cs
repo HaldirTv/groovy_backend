@@ -9,6 +9,11 @@ Groovra.Shared.DotEnvLoader.MapIfPresent("STRIPE_WEBHOOK_SECRET", "Stripe__Webho
 
 var builder = WebApplication.CreateBuilder(args);
 
+Groovra.Shared.EnvValidation.RequireConfig(builder.Configuration,
+    "Stripe:SecretKey",
+    "Stripe:PublishableKey",
+    "Stripe:WebhookSecret");
+
 builder.Services.AddControllers()
     .AddJsonOptions(o =>
     {
@@ -18,7 +23,12 @@ builder.Services.AddControllers()
 
 builder.Services.AddOpenApi();
 
-var dbPath = Path.Combine(AppContext.BaseDirectory, "billing.db");
+// Окрема піддиректорія (не сам AppContext.BaseDirectory) - щоб можна було змонтувати
+// одним docker volume саме дані, а не всю папку застосунку. Без volume взагалі кожен
+// docker compose up --build стирав би всю історію підписок/платежів разом з контейнером.
+var dataDir = Path.Combine(AppContext.BaseDirectory, "data");
+Directory.CreateDirectory(dataDir);
+var dbPath = Path.Combine(dataDir, "billing.db");
 builder.Services.AddDbContext<BillingDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
 
@@ -42,6 +52,9 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseCors();
+
+app.MapGet("/health", () => Results.Ok());
+
 app.MapControllers();
 app.MapOpenApi();
 

@@ -25,6 +25,20 @@ Groovra.Shared.DotEnvLoader.MapIfPresent("GOOGLE_CLIENT_SECRET", "Authentication
 
 var builder = WebApplication.CreateBuilder(args);
 
+Groovra.Shared.EnvValidation.RequireConfig(builder.Configuration,
+    "ConnectionStrings:DefaultConnection",
+    "Jwt:Key");
+
+// Без TLS Kestrel не може сам розрізняти HTTP/1.1 і HTTP/2 на одному порту (потрібне ALPN).
+// Цей сервіс приймає gRPC (UserNameGrpcService) від Chat/Music по внутрішній docker-мережі -
+// без розділення портів кожен такий виклик падав з "HTTP_1_1_REQUIRED". 8080 лишається
+// чистим REST для gateway (EXPOSE 8081 у Dockerfile уже був, просто не використовувався).
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(8080, listenOptions => listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1);
+    options.ListenAnyIP(8081, listenOptions => listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2);
+});
+
 builder.Services.AddMessagingBus(builder.Configuration);
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -60,6 +74,7 @@ builder.Services.AddHttpClient("MusicService", client =>
 {
     var musicServiceUrl = builder.Configuration["Services:MusicServiceUrl"] ?? "http://localhost:5002";
     client.BaseAddress = new Uri(musicServiceUrl);
+    client.Timeout = TimeSpan.FromSeconds(5);
 });
 
 builder.Services.Configure<MailtrapOptions>(builder.Configuration.GetSection("Email:Mailtrap"));
@@ -195,6 +210,12 @@ catch { }
 
 app.UseForwardedHeaders();
 app.UseAuthorization(); 
+
+// Стає доступним лише ПІСЛЯ блокуючого циклу міграцій вище (app.Run() - остання команда) -
+// тому docker-compose healthcheck на цей ендпоінт коректно відрізняє "процес стартував" від
+// "реально готовий приймати трафік" (без цього залежні сервіси могли ловити 502/connection
+// refused у перші секунди після старту).
+app.MapGet("/health", () => Results.Ok());
 
 app.MapControllers();
 app.MapGrpcService<Groovra.Auth.Microservice.GRPC.UserNameGrpcService>();

@@ -7,9 +7,10 @@ namespace Groovra.Messaging.Extensions;
 public static class MessagingDependencyInjection
 {
     public static IServiceCollection AddMessagingBus(
-        this IServiceCollection services, 
+        this IServiceCollection services,
         IConfiguration configuration,
-        Assembly? consumersAssembly = null)
+        Assembly? consumersAssembly = null,
+        string? endpointPrefix = null)
     {
         services.AddMassTransit(x =>
         {
@@ -17,6 +18,14 @@ public static class MessagingDependencyInjection
             {
                 x.AddConsumers(consumersAssembly);
             }
+
+            // Consumer classes are only unique per-assembly, not globally (e.g. Music and Chat both
+            // have a UserNicknameChangedConsumer). The default formatter names queues after the consumer
+            // class alone, so without a per-service prefix two services would bind the same queue name
+            // and silently become competing consumers of each other's events.
+            var formatter = endpointPrefix != null
+                ? new KebabCaseEndpointNameFormatter(endpointPrefix, false)
+                : KebabCaseEndpointNameFormatter.Instance;
 
             var host = configuration["RabbitMQ:Host"] ?? "none";
             var virtualHost = configuration["RabbitMQ:VirtualHost"] ?? "/";
@@ -27,7 +36,7 @@ public static class MessagingDependencyInjection
             {
                 x.UsingInMemory((context, cfg) =>
                 {
-                    cfg.ConfigureEndpoints(context);
+                    cfg.ConfigureEndpoints(context, formatter);
                 });
             }
             else
@@ -40,7 +49,7 @@ public static class MessagingDependencyInjection
                         h.Password(password);
                     });
 
-                    cfg.ConfigureEndpoints(context);
+                    cfg.ConfigureEndpoints(context, formatter);
                 });
             }
 

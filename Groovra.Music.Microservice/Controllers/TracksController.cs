@@ -269,6 +269,7 @@ public class TracksController : ControllerBase
         {
             var historyBaseUrl = (_configuration["History:BaseUrl"] ?? "https://localhost:7232").TrimEnd('/');
             var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
             client.DefaultRequestHeaders.Add("X-User-Id", userId.ToString());
 
             var response = await client.GetAsync(

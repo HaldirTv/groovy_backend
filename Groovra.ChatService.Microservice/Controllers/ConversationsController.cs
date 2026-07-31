@@ -19,19 +19,22 @@ public class ConversationsController : ControllerBase
     private readonly UserNameGrpcService.UserNameGrpcServiceClient _userNameClient;
     private readonly IHubContext<ChatHub> _hub;
     private readonly IFileStorageService _fileStorage;
+    private readonly ILogger<ConversationsController> _logger;
 
     public ConversationsController(
         ChatDbContext db,
         TrackInfoGrpcService.TrackInfoGrpcServiceClient trackInfoClient,
         UserNameGrpcService.UserNameGrpcServiceClient userNameClient,
         IHubContext<ChatHub> hub,
-        IFileStorageService fileStorage)
+        IFileStorageService fileStorage,
+        ILogger<ConversationsController> logger)
     {
         _db = db;
         _trackInfoClient = trackInfoClient;
         _userNameClient = userNameClient;
         _hub = hub;
         _fileStorage = fileStorage;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -715,8 +718,21 @@ public class ConversationsController : ControllerBase
 
         var grpcRequest = new TrackInfoRequest { CurrentUserId = userId.ToString() };
         grpcRequest.TrackIds.Add(request.TrackId.ToString());
-        var grpcResponse = await _trackInfoClient.GetTracksInfoAsync(grpcRequest, cancellationToken: cancellationToken);
-        var track = grpcResponse.Tracks.FirstOrDefault();
+
+        TrackDetails? track;
+        try
+        {
+            var grpcResponse = await _trackInfoClient.GetTracksInfoAsync(
+                grpcRequest,
+                deadline: DateTime.UtcNow.AddSeconds(5),
+                cancellationToken: cancellationToken);
+            track = grpcResponse.Tracks.FirstOrDefault();
+        }
+        catch (Grpc.Core.RpcException ex)
+        {
+            _logger.LogWarning(ex, "GetTracksInfoAsync failed while sharing track {TrackId} in conversation {ConversationId}", request.TrackId, id);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Сервіс музики тимчасово недоступний. Спробуйте ще раз." });
+        }
 
         if (track == null)
             return NotFound(new { message = "Трек не знайдено." });
@@ -1100,8 +1116,20 @@ public class ConversationsController : ControllerBase
 
         var request = new TrackInfoRequest { CurrentUserId = userId.ToString() };
         request.TrackIds.AddRange(trackIds);
-        var grpcResponse = await _trackInfoClient.GetTracksInfoAsync(request, cancellationToken: cancellationToken);
-        return grpcResponse.Tracks.ToDictionary(t => t.TrackId, t => t);
+
+        try
+        {
+            var grpcResponse = await _trackInfoClient.GetTracksInfoAsync(
+                request,
+                deadline: DateTime.UtcNow.AddSeconds(5),
+                cancellationToken: cancellationToken);
+            return grpcResponse.Tracks.ToDictionary(t => t.TrackId, t => t);
+        }
+        catch (Grpc.Core.RpcException ex)
+        {
+            _logger.LogWarning(ex, "GetTracksInfoAsync failed while hydrating {Count} shared track(s) for user {UserId}; returning messages without track metadata", trackIds.Count, userId);
+            return new Dictionary<string, TrackDetails>();
+        }
     }
 
     private async Task<ConversationDto> ToDtoAsync(Conversation c, CancellationToken cancellationToken)

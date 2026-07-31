@@ -1,4 +1,10 @@
-version: '3.8'
+# Без ліміту json-file логи можуть з'їсти весь диск дроплета (10GB) - саме так
+# раніше траплялось "No space left on device" під час білдів.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   redis:
@@ -7,6 +13,12 @@ services:
     restart: always
     ports:
       - "6379:6379"
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -18,6 +30,12 @@ services:
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   auth-service:
     build:
@@ -44,9 +62,22 @@ services:
       - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
       - Services__MusicServiceUrl=http://music-service:8080
       - MediaStorage__BasePath=/app/MediaStorage
+    volumes:
+      - groovra-auth-media-volume:/app/MediaStorage
+    logging: *default-logging
     depends_on:
-      - rabbitmq
-      - redis
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # start_period дає запас на блокуючий цикл EF-міграцій (до 15 спроб по 3с проти
+    # віддаленої БД) перед тим, як невдалі проби почнуть рахуватись у retries.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   music-service:
     build:
@@ -63,7 +94,7 @@ services:
       - RabbitMQ__Host=rabbitmq
       - RabbitMQ__Username=guest
       - RabbitMQ__Password=guest
-      - AuthGrpcUrl=http://auth-service:8080
+      - AuthGrpcUrl=http://auth-service:8081
       - History__BaseUrl=http://history-service:8080
       - JamendoApi__BaseUrl=https://api.jamendo.com/v3.0
       - JamendoApi__ClientId=16efb5ab
@@ -73,10 +104,20 @@ services:
       - OpenModel__ApiKey=${OPENMODEL_API_KEY}
     volumes:
       - groovra-media-volume:/app/media
+    logging: *default-logging
     depends_on:
-      - rabbitmq
-      - redis
-      - auth-service
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   billing-service:
     build:
@@ -90,6 +131,15 @@ services:
       - Stripe__SecretKey=${STRIPE_SECRET_KEY}
       - Stripe__PublishableKey=${STRIPE_PUBLISHABLE_KEY}
       - Stripe__WebhookSecret=${STRIPE_WEBHOOK_SECRET}
+    volumes:
+      - groovra-billing-data-volume:/app/data
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   history-service:
     build:
@@ -104,10 +154,19 @@ services:
       - RabbitMQ__Host=rabbitmq
       - RabbitMQ__Username=guest
       - RabbitMQ__Password=guest
-      - MusicGrpcUrl=http://music-service:8080
+      - MusicGrpcUrl=http://music-service:8081
+    logging: *default-logging
     depends_on:
-      - rabbitmq
-      - music-service
+      rabbitmq:
+        condition: service_healthy
+      music-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   chat-service:
     build:
@@ -119,8 +178,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
       - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
-      - MusicGrpcUrl=http://music-service:8080
-      - AuthGrpcUrl=http://auth-service:8080
+      - MusicGrpcUrl=http://music-service:8081
+      - AuthGrpcUrl=http://auth-service:8081
       - RabbitMQ__Host=rabbitmq
       - RabbitMQ__Username=guest
       - RabbitMQ__Password=guest
@@ -130,10 +189,20 @@ services:
       - CloudflareR2__BucketName=${CLOUDFLARE_R2_BUCKET_NAME}
       - CloudflareR2__PublicUrl=${CLOUDFLARE_R2_PUBLIC_URL}
       - CloudflareR2__ServiceUrl=${CLOUDFLARE_R2_SERVICE_URL}
+    logging: *default-logging
     depends_on:
-      - rabbitmq
-      - music-service
-      - auth-service
+      rabbitmq:
+        condition: service_healthy
+      music-service:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   gateway:
     build:
@@ -151,19 +220,33 @@ services:
       - Jwt__Key=${JWT_SECRET_KEY}
       - Jwt__Issuer=groovra.local
       - Jwt__Audience=groovra.clients
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
       - Redis__ConnectionString=redis:6379
       - ReverseProxy__Clusters__auth-cluster__Destinations__auth-destination__Address=http://auth-service:8080
       - ReverseProxy__Clusters__music-cluster__Destinations__music-destination__Address=http://music-service:8080
       - ReverseProxy__Clusters__history-cluster__Destinations__history-destination__Address=http://history-service:8080
       - ReverseProxy__Clusters__chat-cluster__Destinations__chat-destination__Address=http://chat-service:8080
       - ReverseProxy__Clusters__billing-cluster__Destinations__billing-destination__Address=http://billing-service:8080
+    logging: *default-logging
     depends_on:
-      - auth-service
-      - music-service
-      - history-service
-      - chat-service
-      - billing-service
-      - redis
+      auth-service:
+        condition: service_healthy
+      music-service:
+        condition: service_healthy
+      history-service:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+      billing-service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # Термінує HTTPS для groovra-backend.duckdns.org - сам отримує й поновлює сертифікат
   # Let's Encrypt (потрібен відкритий 80 порт для ACME-challenge й 443 для самого HTTPS).
@@ -179,10 +262,14 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    logging: *default-logging
     depends_on:
-      - gateway
+      gateway:
+        condition: service_healthy
 
 volumes:
   groovra-media-volume:
+  groovra-auth-media-volume:
+  groovra-billing-data-volume:
   caddy_data:
   caddy_config:

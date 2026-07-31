@@ -13,11 +13,13 @@ public class HistoryController : ControllerBase
 {
     private readonly HistoryDbContext _db;
     private readonly TrackInfoGrpcService.TrackInfoGrpcServiceClient _trackInfoClient;
+    private readonly ILogger<HistoryController> _logger;
 
-    public HistoryController(HistoryDbContext db, TrackInfoGrpcService.TrackInfoGrpcServiceClient trackInfoClient)
+    public HistoryController(HistoryDbContext db, TrackInfoGrpcService.TrackInfoGrpcServiceClient trackInfoClient, ILogger<HistoryController> logger)
     {
         _db = db;
         _trackInfoClient = trackInfoClient;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -54,8 +56,21 @@ public class HistoryController : ControllerBase
         var request = new TrackInfoRequest { CurrentUserId = userId.ToString() };
         request.TrackIds.AddRange(historyItems.Select(h => h.TrackId.ToString()).Distinct());
 
-        var grpcResponse = await _trackInfoClient.GetTracksInfoAsync(request, cancellationToken: cancellationToken);
-        var trackDict = grpcResponse.Tracks.ToDictionary(t => t.TrackId, t => t);
+        // Track metadata is an enrichment, not the source of truth for this endpoint - if Music is
+        // slow/unreachable, degrade to "Unknown" fields instead of failing the whole history request.
+        var trackDict = new Dictionary<string, TrackDetails>();
+        try
+        {
+            var grpcResponse = await _trackInfoClient.GetTracksInfoAsync(
+                request,
+                deadline: DateTime.UtcNow.AddSeconds(5),
+                cancellationToken: cancellationToken);
+            trackDict = grpcResponse.Tracks.ToDictionary(t => t.TrackId, t => t);
+        }
+        catch (Grpc.Core.RpcException ex)
+        {
+            _logger.LogWarning(ex, "GetTracksInfoAsync failed while enriching history for user {UserId}; returning history without track metadata", userId);
+        }
 
         var richItems = historyItems.Select(h => 
         {

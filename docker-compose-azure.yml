@@ -22,7 +22,7 @@ services:
       - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
       - Redis__ConnectionString=in-memory
       - RabbitMQ__Host=none
-      - AuthGrpcUrl=http://auth-service:8080
+      - AuthGrpcUrl=http://auth-service:8081
     depends_on:
       - auth-service
 
@@ -34,7 +34,7 @@ services:
       - ASPNETCORE_URLS=http://+:8080
       - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
       - RabbitMQ__Host=none
-      - MusicGrpcUrl=http://music-service:8080
+      - MusicGrpcUrl=http://music-service:8081
     depends_on:
       - music-service
 

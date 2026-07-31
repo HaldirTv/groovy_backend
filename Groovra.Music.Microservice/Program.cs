@@ -22,6 +22,23 @@ Groovra.Shared.DotEnvLoader.MapIfPresent("OPENMODEL_API_KEY", "OpenModel__ApiKey
 
 var builder = WebApplication.CreateBuilder(args);
 
+Groovra.Shared.EnvValidation.RequireConfig(builder.Configuration,
+    "ConnectionStrings:DefaultConnection");
+
+// Kestrel без TLS не вміє сам розрізняти HTTP/1.1 і HTTP/2 на одному порту - для цього
+// потрібне ALPN, а воно є лише в TLS. "HttpProtocols.Http1AndHttp2" на голому http:// молча
+// відкочується на HTTP/1.1 (Kestrel сам пише про це в лог: "HTTP/2 requires TLS application
+// protocol negotiation"). Тому цей сервіс приймає gRPC-виклики (Chat/History/Music -> Auth
+// по TrackInfo/UserName) від інших сервісів по внутрішній docker-мережі - без цього кожен
+// такий виклик падав з "HTTP_1_1_REQUIRED" (RpcException), а виклики без try/catch навколо
+// (напр. History.GetUserHistory) віддавали 500 назовні. 8080 лишається чистим REST/HTTP1.1
+// для gateway (EXPOSE 8081 у Dockerfile уже був - просто не використовувався).
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(8080, listenOptions => listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1);
+    options.ListenAnyIP(8081, listenOptions => listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2);
+});
+
 // Довіряємо X-Forwarded-Proto від gateway (усередині docker-мережі з'єднання завжди
 // звичайний HTTP, інакше Request.Scheme тут завжди був би "http", навіть коли зовнішній
 // клієнт прийшов по HTTPS через Caddy - і всі публічні URL (audioUrl, обкладинки),
@@ -43,7 +60,7 @@ builder.Services.AddControllers(options =>
     o.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
 });
 
-builder.Services.AddMessagingBus(builder.Configuration, typeof(Program).Assembly);
+builder.Services.AddMessagingBus(builder.Configuration, typeof(Program).Assembly, "music");
 
 builder.Services.AddOpenApi(options =>
 {
@@ -318,5 +335,7 @@ using (var scope = app.Services.CreateScope())
 
     BackgroundJob.Enqueue<CacheWarmupService>(service => service.WarmUpAsync(CancellationToken.None));
 }
+
+app.MapGet("/health", () => Results.Ok());
 
 app.Run();

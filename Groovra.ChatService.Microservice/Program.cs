@@ -20,13 +20,22 @@ Groovra.Shared.DotEnvLoader.MapIfPresent("CLOUDFLARE_R2_SERVICE_URL", "Cloudflar
 
 var builder = WebApplication.CreateBuilder(args);
 
+Groovra.Shared.EnvValidation.RequireConfig(builder.Configuration,
+    "ConnectionStrings:DefaultConnection",
+    "CloudflareR2:AccountId",
+    "CloudflareR2:AccessKeyId",
+    "CloudflareR2:SecretAccessKey",
+    "CloudflareR2:BucketName",
+    "CloudflareR2:PublicUrl",
+    "CloudflareR2:ServiceUrl");
+
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
 builder.Services.AddOpenApi();
 
 builder.Services.AddAuthorization();
 
-builder.Services.AddMessagingBus(builder.Configuration, typeof(Program).Assembly);
+builder.Services.AddMessagingBus(builder.Configuration, typeof(Program).Assembly, "chat");
 
 builder.Services.Configure<CloudflareR2Options>(builder.Configuration.GetSection("CloudflareR2"));
 builder.Services.AddSingleton<IAmazonS3>(sp =>
@@ -127,6 +136,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseAuthorization();
+
+app.MapGet("/health", () => Results.Ok());
 
 app.MapControllers();
 app.MapHub<ChatHub>("/chat/hub");

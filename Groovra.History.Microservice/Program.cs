@@ -14,6 +14,9 @@ Groovra.Shared.DotEnvLoader.MapIfPresent("DB_CONNECTION_STRING", "ConnectionStri
 
 var builder = WebApplication.CreateBuilder(args);
 
+Groovra.Shared.EnvValidation.RequireConfig(builder.Configuration,
+    "ConnectionStrings:DefaultConnection");
+
 builder.Services.AddControllers()
     .AddJsonOptions(o =>
     {
@@ -73,7 +76,7 @@ builder.Services.AddOpenApi(options =>
         return Task.CompletedTask;
     });
 });
-builder.Services.AddMessagingBus(builder.Configuration, typeof(Program).Assembly);
+builder.Services.AddMessagingBus(builder.Configuration, typeof(Program).Assembly, "history");
 
 var app = builder.Build();
 
@@ -101,7 +104,9 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
 }
 
-app.UseAuthorization(); 
+app.UseAuthorization();
+
+app.MapGet("/health", () => Results.Ok());
 
 app.MapControllers();
 app.Run();

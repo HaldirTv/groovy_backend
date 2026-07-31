@@ -18,10 +18,12 @@ public class PlaylistsController : ControllerBase
     private readonly ICacheService _cache;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<PlaylistsController> _logger;
 
     public PlaylistsController(
         PlaylistService playlistService, FavoritesService favoritesService, GeminiAiService geminiAiService,
-        ICacheService cache, IHttpClientFactory httpClientFactory, IConfiguration configuration)
+        ICacheService cache, IHttpClientFactory httpClientFactory, IConfiguration configuration,
+        ILogger<PlaylistsController> logger)
     {
         _playlistService = playlistService;
         _favoritesService = favoritesService;
@@ -29,6 +31,7 @@ public class PlaylistsController : ControllerBase
         _cache = cache;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
+        _logger = logger;
     }
 
     [HttpPost("ai-mix")]
@@ -46,6 +49,7 @@ public class PlaylistsController : ControllerBase
         {
             var billingBaseUrl = _configuration["Billing:BaseUrl"] ?? "http://localhost:5041";
             var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
             client.DefaultRequestHeaders.Add("X-User-Id", userId.ToString());
             var billingRes = await client.PostAsync($"{billingBaseUrl.TrimEnd('/')}/billing/ai-mix/check-and-increment", null, cancellationToken);
             if (!billingRes.IsSuccessStatusCode)
@@ -56,7 +60,7 @@ public class PlaylistsController : ControllerBase
         }
         catch (System.Exception ex)
         {
-            System.Console.WriteLine($"Billing check warning: {ex.Message}");
+            _logger.LogWarning(ex, "Billing check-and-increment call failed for user {UserId}; proceeding without a hard block", userId);
         }
 
         var result = await _geminiAiService.GenerateAiMixAsync(
