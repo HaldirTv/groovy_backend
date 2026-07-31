@@ -2,6 +2,11 @@
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 # curl - лише для docker-compose healthcheck (CMD curl), базовий образ його не має.
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# /app/data має існувати в образі з правильним власником ДО того, як туди змонтується
+# groovra-billing-data-volume: порожній named volume при першому підключенні успадковує
+# вміст/права з цього шляху в образі. Без цього Docker сам створює точку монтування як
+# root, і non-root $APP_UID не може писати SQLite-файл -> "unable to open database file".
+RUN mkdir -p /app/data && chown $APP_UID:$APP_UID /app/data
 USER $APP_UID
 WORKDIR /app
 EXPOSE 8080
