@@ -6,8 +6,9 @@ using Groovra.Music.Microservice.Model;
 using Groovra.Music.Microservice.Services;
 using Groovra.Shared.Grpc;
 using Grpc.Net.Client;
-using Hangfire; 
+using Hangfire;
 using MassTransit;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
@@ -20,6 +21,17 @@ Groovra.Shared.DotEnvLoader.MapIfPresent("GEMINI_API_KEY", "Gemini__ApiKey");
 Groovra.Shared.DotEnvLoader.MapIfPresent("OPENMODEL_API_KEY", "OpenModel__ApiKey");
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Довіряємо X-Forwarded-Proto від gateway (усередині docker-мережі з'єднання завжди
+// звичайний HTTP, інакше Request.Scheme тут завжди був би "http", навіть коли зовнішній
+// клієнт прийшов по HTTPS через Caddy - і всі публічні URL (audioUrl, обкладинки),
+// які контролери будують з Request.Scheme/Host, ламались би mixed-content блоком браузера).
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 builder.Services.AddControllers(options =>
 {
@@ -176,6 +188,8 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 builder.Services.AddSingleton<ICacheService, RedisCacheService>();
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 // Блокирующий вызов с ретраями (как у остальных сервисов) - приложение не начинает
 // принимать трафик, пока схема реально не накатана.

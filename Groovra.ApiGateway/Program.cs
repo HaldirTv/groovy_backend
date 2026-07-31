@@ -51,6 +51,13 @@ builder.Services.AddReverseProxy()
         // forwarder може перезаписати його пізніше в конвеєрі).
         builderContext.AddOriginalHost(true);
 
+        // З'єднання gateway -> music-service всередині мережі docker завжди звичайний HTTP
+        // (ASPNETCORE_URLS=http://+:8080), тому Request.Scheme там був би "http", навіть
+        // якщо зовнішній клієнт прийшов по HTTPS через Caddy - і Music будувала б audioUrl
+        // на http://, що браузер блокує як mixed content з HTTPS-фронтенду. Прокидаємо
+        // справжню схему через X-Forwarded-Proto; Music довіряє їй через UseForwardedHeaders.
+        builderContext.AddXForwardedProto();
+
         builderContext.AddRequestTransform(async transformContext =>
         {
             var user = transformContext.HttpContext.User;
