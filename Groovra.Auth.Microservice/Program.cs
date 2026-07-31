@@ -8,6 +8,21 @@ using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 using Microsoft.Extensions.FileProviders;
 
+// Локально (dotnet run, без docker-compose) секрети беремо з кореневого .env замість того,
+// щоб тримати їх у appsettings.Development.json. У контейнері docker-compose вже прокидає
+// ASP.NET-змінні напряму - MapIfPresent там нічого не перезапише.
+Groovra.Shared.DotEnvLoader.LoadFromNearestEnvFile();
+Groovra.Shared.DotEnvLoader.MapIfPresent("DB_CONNECTION_STRING", "ConnectionStrings__DefaultConnection");
+Groovra.Shared.DotEnvLoader.MapIfPresent("DB_CONNECTION_STRING", "ConnectionStrings__DefaultConnectionRemote");
+Groovra.Shared.DotEnvLoader.MapIfPresent("JWT_SECRET_KEY", "Jwt__Key");
+Groovra.Shared.DotEnvLoader.MapIfPresent("MAIL_USER", "Email__Mailtrap__Username");
+Groovra.Shared.DotEnvLoader.MapIfPresent("MAIL_PASS", "Email__Mailtrap__Password");
+Groovra.Shared.DotEnvLoader.MapIfPresent("BREVO_SMTP_USERNAME", "Email__Brevo__Username");
+Groovra.Shared.DotEnvLoader.MapIfPresent("BREVO_SMTP_PASSWORD", "Email__Brevo__Password");
+Groovra.Shared.DotEnvLoader.MapIfPresent("BREVO_FROM_EMAIL", "Email__Brevo__FromEmail");
+Groovra.Shared.DotEnvLoader.MapIfPresent("GOOGLE_CLIENT_ID", "Authentication__Google__ClientId");
+Groovra.Shared.DotEnvLoader.MapIfPresent("GOOGLE_CLIENT_SECRET", "Authentication__Google__ClientSecret");
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddMessagingBus(builder.Configuration);
@@ -37,6 +52,15 @@ builder.Services.AddDbContext<AuthDbContext>(options =>
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<ReglogService>();
 builder.Services.AddScoped<TwoFactorService>();
+builder.Services.AddScoped<AdminService>();
+
+// AdminService тягне лічильник AI-треків з Music-сервісу (GET /music/stats/ai-tracks-count)
+// для дашборда. Адреса приходить з конфіга/оточення - у compose це http://music-service:8080.
+builder.Services.AddHttpClient("MusicService", client =>
+{
+    var musicServiceUrl = builder.Configuration["Services:MusicServiceUrl"] ?? "http://localhost:5002";
+    client.BaseAddress = new Uri(musicServiceUrl);
+});
 
 builder.Services.Configure<MailtrapOptions>(builder.Configuration.GetSection("Email:Mailtrap"));
 builder.Services.Configure<BrevoOptions>(builder.Configuration.GetSection("Email:Brevo"));
@@ -141,9 +165,11 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
 }
 
+// AppContext.BaseDirectory, а не текущий каталог процесса: аватары/баннеры должны
+// раздаваться из той же папки, куда их пишет ProfileController, независимо от запуска.
 var mediaPathConfig = builder.Configuration["MediaStorage:BasePath"];
 var mediaPath = string.IsNullOrWhiteSpace(mediaPathConfig)
-    ? Path.Combine(Directory.GetCurrentDirectory(), "MediaStorage")
+    ? Path.Combine(AppContext.BaseDirectory, "MediaStorage")
     : Path.GetFullPath(mediaPathConfig);
 
 try

@@ -31,9 +31,11 @@ public class  ProfileController : ControllerBase
         _publishEndpoint = publishEndpoint;
         _logger = logger;
 
+        // AppContext.BaseDirectory, а не текущий каталог процесса — иначе аватар,
+        // сохранённый при одном способе запуска, не находился бы при другом.
         var configured = configuration["MediaStorage:BasePath"];
         var basePath = string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(Directory.GetCurrentDirectory(), "MediaStorage")
+            ? Path.Combine(AppContext.BaseDirectory, "MediaStorage")
             : Path.GetFullPath(configured);
 
         try

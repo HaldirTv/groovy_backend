@@ -2,6 +2,11 @@ using Groovra.Billing.Microservice.Data;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 
+Groovra.Shared.DotEnvLoader.LoadFromNearestEnvFile();
+Groovra.Shared.DotEnvLoader.MapIfPresent("STRIPE_SECRET_KEY", "Stripe__SecretKey");
+Groovra.Shared.DotEnvLoader.MapIfPresent("STRIPE_PUBLISHABLE_KEY", "Stripe__PublishableKey");
+Groovra.Shared.DotEnvLoader.MapIfPresent("STRIPE_WEBHOOK_SECRET", "Stripe__WebhookSecret");
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers()

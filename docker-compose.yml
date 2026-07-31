@@ -19,16 +19,6 @@ services:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
 
-  mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: groovra-mssql
-    restart: always
-    ports:
-      - "1433:1433"
-    environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=Groovra@2024!
-
   auth-service:
     build:
       context: .
@@ -51,11 +41,11 @@ services:
       - Email__Mailtrap__Password=${MAIL_PASS}
       - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
       - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
+      - Services__MusicServiceUrl=http://music-service:8080
       - MediaStorage__BasePath=/app/MediaStorage
     depends_on:
       - rabbitmq
       - redis
-      - mssql
 
   music-service:
     build:
@@ -86,7 +76,6 @@ services:
       - rabbitmq
       - redis
       - auth-service
-      - mssql
 
   billing-service:
     build:
@@ -118,7 +107,6 @@ services:
     depends_on:
       - rabbitmq
       - music-service
-      - mssql
 
   chat-service:
     build:
@@ -145,15 +133,16 @@ services:
       - rabbitmq
       - music-service
       - auth-service
-      - mssql
 
   gateway:
     build:
       context: .
       dockerfile: Groovra.ApiGateway/Dockerfile
     container_name: groovra-gateway
-    ports:
-      - "80:8080"
+    # Порт 80 більше не мапиться на хост напряму - тепер його займає Caddy (нижче),
+    # який термінує HTTPS і проксує сюди по внутрішній docker-мережі (gateway:8080).
+    expose:
+      - "8080"
     restart: always
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
@@ -175,6 +164,23 @@ services:
       - billing-service
       - redis
 
+  # Термінує HTTPS для groovra-backend.duckdns.org - сам отримує й поновлює сертифікат
+  # Let's Encrypt (потрібен відкритий 80 порт для ACME-challenge й 443 для самого HTTPS).
+  # Конфіг у Caddyfile поруч у корені репо.
+  caddy:
+    image: caddy:2-alpine
+    container_name: groovra-caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - gateway
+
   frontend:
     build:
       context: ./groovy_frontend
@@ -191,3 +197,5 @@ services:
 
 volumes:
   groovra-media-volume:
+  caddy_data:
+  caddy_config:

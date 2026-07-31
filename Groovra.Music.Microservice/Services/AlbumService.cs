@@ -29,6 +29,25 @@ public class AlbumService
         await _cache.RemoveByPatternAsync(CacheKeys.AlbumsSearchPatternAll, cancellationToken);
         await _cache.RemoveByPatternAsync(CacheKeys.ArtistsSearchPatternAll, cancellationToken);
     }
+
+    /// <summary>
+    /// Операції над альбомом міняють і рядки треків (AlbumId/AlbumTitle), а трек кешується
+    /// окремо — під music:track:{id} та у списках. Без цього скидання видалення альбому
+    /// правильно відв'язувало трек у БД, але API ще довго віддавав закешований DTO зі
+    /// старою назвою вже видаленого альбому. Викликати всюди, де змінюються треки.
+    /// </summary>
+    private async Task InvalidateTracksCacheAsync(IEnumerable<Guid> trackIds, CancellationToken cancellationToken)
+    {
+        foreach (var trackId in trackIds.Distinct())
+        {
+            await _cache.RemoveAsync(CacheKeys.Track(trackId), cancellationToken);
+        }
+
+        foreach (var pattern in CacheKeys.ListPatterns)
+        {
+            await _cache.RemoveByPatternAsync(pattern, cancellationToken);
+        }
+    }
     public async Task<ServiceResult<(AlbumDto Album, BulkTrackOperationResult TrackDetails)>> CreateAlbumAsync(
         Guid ownerUserId, string artistName, CreateAlbumDto dto, string baseUrl, CancellationToken cancellationToken = default)
     {
@@ -77,6 +96,7 @@ public class AlbumService
 
         await _context.SaveChangesAsync(cancellationToken);
         await InvalidateAlbumsCacheAsync(cancellationToken);
+        await InvalidateTracksCacheAsync(trackResult.AddedIds, cancellationToken);
         var albumDto = MapToDto(album, album.Tracks.ToList(), baseUrl, false);
         return ServiceResult<(AlbumDto, BulkTrackOperationResult)>.Ok((albumDto, trackResult));
     }
@@ -131,9 +151,16 @@ public class AlbumService
 
         if (titleChanged)
         {
+            var renamedTrackIds = await _context.Tracks
+                .Where(t => t.AlbumId == albumId)
+                .Select(t => t.Id)
+                .ToListAsync(cancellationToken);
+
             await _context.Tracks
                 .Where(t => t.AlbumId == albumId)
                 .ExecuteUpdateAsync(s => s.SetProperty(t => t.AlbumTitle, album.Title), cancellationToken);
+
+            await InvalidateTracksCacheAsync(renamedTrackIds, cancellationToken);
         }
 
         await InvalidateAlbumsCacheAsync(cancellationToken);
@@ -267,6 +294,7 @@ public class AlbumService
             album.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync(cancellationToken);
             await InvalidateAlbumsCacheAsync(cancellationToken);
+            await InvalidateTracksCacheAsync(result.AddedIds, cancellationToken);
         }
 
         return result;
@@ -285,6 +313,22 @@ public class AlbumService
 
         var existingTrackIdsInAlbum = album.Tracks?.Select(t => t.Id).ToHashSet() ?? new HashSet<Guid>();
 
+        // Альбоми, що блокують ці треки, можуть лежати в кошику — а кошик відфільтрований
+        // глобальним !IsDeleted, тому дізнатись про них можна лише з IgnoreQueryFilters.
+        var blockingAlbumIds = tracks
+            .Where(t => t.AlbumId.HasValue && t.AlbumId.Value != album.Id)
+            .Select(t => t.AlbumId!.Value)
+            .Distinct()
+            .ToList();
+
+        var trashedAlbumIds = blockingAlbumIds.Count == 0
+            ? new HashSet<Guid>()
+            : (await _context.Albums
+                .IgnoreQueryFilters()
+                .Where(a => blockingAlbumIds.Contains(a.Id) && a.IsDeleted)
+                .Select(a => a.Id)
+                .ToListAsync(cancellationToken)).ToHashSet();
+
         foreach (var track in tracks)
         {
             if ((track.AlbumId.HasValue && track.AlbumId.Value == album.Id) || existingTrackIdsInAlbum.Contains(track.Id))
@@ -295,7 +339,10 @@ public class AlbumService
 
             if (track.AlbumId.HasValue && track.AlbumId.Value != album.Id)
             {
-                result.BelongsToAnotherAlbumIds.Add(track.Id);
+                if (trashedAlbumIds.Contains(track.AlbumId.Value))
+                    result.BelongsToTrashedAlbumIds.Add(track.Id);
+                else
+                    result.BelongsToAnotherAlbumIds.Add(track.Id);
                 continue;
             }
 
@@ -333,6 +380,7 @@ public class AlbumService
 
         await _context.SaveChangesAsync(cancellationToken);
         await InvalidateAlbumsCacheAsync(cancellationToken);
+        await InvalidateTracksCacheAsync([trackId], cancellationToken);
         return ServiceResult<bool>.Ok(true);
     }
 
@@ -346,26 +394,25 @@ public class AlbumService
 
         var now = DateTime.UtcNow;
 
-        // Альбом має пряму FK-прив'язку треків (на відміну від плейлистів, де це
-        // join-таблиця), тому при переміщенні в кошик треки явно звільняються —
-        // інакше вони лишаються "прикріпленими" до видаленого альбому (не можуть бути
-        // додані в інший альбом, показують застарілу назву альбому в списках тощо).
-        await _context.Tracks
-            .Where(t => t.AlbumId == albumId)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(t => t.AlbumId, (Guid?)null)
-                .SetProperty(t => t.AlbumTitle, (string?)null), cancellationToken);
-
+        // ВАЖЛИВО: кошик НЕ розриває зв'язок альбом-трек. Раніше тут треки одразу
+        // від'єднувались і TrackCount обнулявся — через це "відновити з кошика"
+        // повертало порожній альбом, а склад із умовних 30 треків губився назавжди.
+        // Тепер AlbumId/AlbumTitle лишаються недоторканими, доки альбом у кошику:
+        // сам альбом просто зникає зі списків (глобальний фільтр !IsDeleted), а
+        // відновлення повертає його рівно в тому ж складі.
+        // Зв'язок рветься лише при остаточному видаленні — у PermanentlyDeleteAlbumAsync
+        // та у 30-денному прибиранні GarbageCollectorService; саме там треки стають
+        // вільними й доступними для вибору в новий альбом.
         album.IsDeleted = true;
         album.DeletedAt = now;
         album.UpdatedAt = now;
-        album.TrackCount = 0;
-        album.TotalDurationSeconds = 0;
 
         await _context.SaveChangesAsync(cancellationToken);
         await InvalidateAlbumsCacheAsync(cancellationToken);
 
-        _logger.LogInformation("Album soft-deleted, tracks freed. Id={Id}", albumId);
+        _logger.LogInformation(
+            "Album moved to trash, {TrackCount} track link(s) preserved for restore. Id={Id}",
+            album.TrackCount, albumId);
         return ServiceResult<bool>.Ok(true);
     }
     public async Task<IReadOnlyList<AlbumListItemDto>> GetDeletedAlbumsAsync(Guid userId, string baseUrl, CancellationToken cancellationToken = default)
@@ -406,6 +453,11 @@ public class AlbumService
         // прибратись через SetNull, але AlbumTitle — денормалізоване поле без FK, тому
         // БД його не чіпає: без явного очищення трек назавжди показував би застарілу
         // назву вже видаленого альбому і блокувався б у пікері інших альбомів.
+        var freedTrackIds = await _context.Tracks
+            .Where(t => t.AlbumId == albumId)
+            .Select(t => t.Id)
+            .ToListAsync(cancellationToken);
+
         await _context.Tracks
             .Where(t => t.AlbumId == albumId)
             .ExecuteUpdateAsync(s => s
@@ -417,6 +469,7 @@ public class AlbumService
         _context.Albums.Remove(album);
         await _context.SaveChangesAsync(cancellationToken);
         await InvalidateAlbumsCacheAsync(cancellationToken);
+        await InvalidateTracksCacheAsync(freedTrackIds, cancellationToken);
 
         _logger.LogInformation("Album permanently deleted. Id={Id}", albumId);
         return ServiceResult<bool>.Ok(true);
@@ -438,8 +491,23 @@ public class AlbumService
         album.DeletedAt = null;
         album.UpdatedAt = DateTime.UtcNow;
 
+        // Склад альбому пережив кошик недоторканим, але поки він там лежав, окремий трек
+        // могли видалити самостійно (його власний soft-delete). Тому лічильники рахуємо
+        // заново з реально живих треків, а не довіряємо збереженому значенню - інакше
+        // відновлений альбом показував би "30 треків" там, де їх лишилось 29.
+        var liveTracks = await _context.Tracks
+            .Where(t => t.AlbumId == albumId)
+            .Select(t => new { t.Id, t.DurationSeconds })
+            .ToListAsync(cancellationToken);
+
+        album.TrackCount = liveTracks.Count;
+        album.TotalDurationSeconds = liveTracks.Sum(t => t.DurationSeconds);
+
         await _context.SaveChangesAsync(cancellationToken);
         await InvalidateAlbumsCacheAsync(cancellationToken);
+        await InvalidateTracksCacheAsync(liveTracks.Select(t => t.Id), cancellationToken);
+
+        _logger.LogInformation("Album restored from trash with {Count} track(s). Id={Id}", liveTracks.Count, albumId);
         return ServiceResult<bool>.Ok(true);
     }
     public async Task<ServiceResult<List<AlbumDto>>> GenerateRandomAlbumsAsync(
@@ -537,7 +605,10 @@ public class AlbumService
             .Where(t => t.AlbumId == albumId)
             .ToListAsync(cancellationToken);
 
-        _logger.LogInformation("Album {AlbumId} automatically filled with {Count} random tracks. Genre filter: {Genre}, OnlySystemTracks: {OnlySystemTracks}", 
+        await InvalidateAlbumsCacheAsync(cancellationToken);
+        await InvalidateTracksCacheAsync(randomTracks.Select(t => t.Id), cancellationToken);
+
+        _logger.LogInformation("Album {AlbumId} automatically filled with {Count} random tracks. Genre filter: {Genre}, OnlySystemTracks: {OnlySystemTracks}",
             albumId, randomTracks.Count, genre ?? "None", onlySystemTracks);
 
         return ServiceResult<AlbumDto>.Ok(MapToDto(album, allAlbumTracks, baseUrl, isLiked: false));

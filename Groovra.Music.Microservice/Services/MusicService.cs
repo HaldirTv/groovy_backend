@@ -28,9 +28,13 @@ public class MusicService
         _publishEndpoint = publishEndpoint;
         _cache = cache;
 
+        // AppContext.BaseDirectory, а НЕ Directory.GetCurrentDirectory(): текущий каталог —
+        // это каталог, из которого процесс запустили, поэтому один и тот же exe искал медиа
+        // то в bin, то в корне решения, и стрим локальных треков отдавал 404. BaseDirectory
+        // всегда указывает на папку самого приложения, независимо от способа запуска.
         var configured = configuration["MediaStorage:BasePath"];
         _mediaBasePath = string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(Directory.GetCurrentDirectory(), "MediaStorage")
+            ? Path.Combine(AppContext.BaseDirectory, "MediaStorage")
             : Path.GetFullPath(configured);
     }
 

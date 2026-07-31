@@ -9,6 +9,15 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 
+Groovra.Shared.DotEnvLoader.LoadFromNearestEnvFile();
+Groovra.Shared.DotEnvLoader.MapIfPresent("DB_CONNECTION_STRING", "ConnectionStrings__DefaultConnection");
+Groovra.Shared.DotEnvLoader.MapIfPresent("CLOUDFLARE_R2_ACCOUNT_ID", "CloudflareR2__AccountId");
+Groovra.Shared.DotEnvLoader.MapIfPresent("CLOUDFLARE_R2_ACCESS_KEY_ID", "CloudflareR2__AccessKeyId");
+Groovra.Shared.DotEnvLoader.MapIfPresent("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "CloudflareR2__SecretAccessKey");
+Groovra.Shared.DotEnvLoader.MapIfPresent("CLOUDFLARE_R2_BUCKET_NAME", "CloudflareR2__BucketName");
+Groovra.Shared.DotEnvLoader.MapIfPresent("CLOUDFLARE_R2_PUBLIC_URL", "CloudflareR2__PublicUrl");
+Groovra.Shared.DotEnvLoader.MapIfPresent("CLOUDFLARE_R2_SERVICE_URL", "CloudflareR2__ServiceUrl");
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();

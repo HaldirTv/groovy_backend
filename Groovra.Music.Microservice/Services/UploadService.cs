@@ -49,9 +49,11 @@ public class UploadService
         _cache = cache;
         _logger = logger;
 
+        // AppContext.BaseDirectory, а не текущий каталог процесса — иначе загруженные файлы
+        // писались бы в разные папки в зависимости от того, откуда запущен сервис.
         var configured = _configuration["MediaStorage:BasePath"];
         var basePath = string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(Directory.GetCurrentDirectory(), "MediaStorage")
+            ? Path.Combine(AppContext.BaseDirectory, "MediaStorage")
             : Path.GetFullPath(configured);
 
         try

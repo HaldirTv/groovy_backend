@@ -54,6 +54,10 @@ public class Track
     public bool IsDeleted { get; set; } = false;
     public DateTime? DeletedAt { get; set; }
     public string? LyricsLrc { get; set; }
+
+    /// <summary>Трек згенеровано ШІ. Використовується адмін-панеллю (позначка AiGen у списку
+    /// контенту) та лічильником на дашборді (music/stats/ai-tracks-count).</summary>
+    public bool IsAIGenerated { get; set; } = false;
     [NotMapped]
     public string? CoverImageUrl
     {

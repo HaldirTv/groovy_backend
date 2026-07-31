@@ -17,15 +17,18 @@ public class AlbumsController : ControllerBase
     private readonly FavoritesService _favoritesService;
     private readonly UserNameGrpcService.UserNameGrpcServiceClient _grpcClient;
     private readonly ICacheService _cache;
+    private readonly ILogger<AlbumsController> _logger;
 
     public AlbumsController(
         AlbumService albumService, FavoritesService favoritesService,
-        UserNameGrpcService.UserNameGrpcServiceClient grpcClient, ICacheService cache)
+        UserNameGrpcService.UserNameGrpcServiceClient grpcClient, ICacheService cache,
+        ILogger<AlbumsController> logger)
     {
         _albumService = albumService;
         _favoritesService = favoritesService;
         _grpcClient = grpcClient;
         _cache = cache;
+        _logger = logger;
     }
     [HttpGet]
     [ProducesResponseType(typeof(PagedResultDto<AlbumListItemDto>), StatusCodes.Status200OK)]
@@ -147,6 +150,11 @@ public class AlbumsController : ControllerBase
                 new { message = "Тільки артисти або адміни можуть створювати альбоми." });
 
         Guid ownerUserId = currentUserId;
+        // X-User-Name несе системний логін (JWT кладе в ClaimTypes.Name саме Username), а
+        // автором альбому має бути публічний DisplayName - те саме значення, яке потім
+        // проставляє MusicUserNicknameChangedConsumer при зміні ніку. Тому тягнемо ім'я
+        // з Auth по gRPC; хедер лишається фолбеком, щоб створення альбому не падало,
+        // якщо Auth тимчасово недоступний.
         string artistName = HttpContext.GetUserName();
 
         if (isAdmin && dto.TargetUserId.HasValue)
@@ -156,11 +164,25 @@ public class AlbumsController : ControllerBase
             {
                 var grpcRequest = new UserNameGrpcRequest { UserId = ownerUserId.ToString() };
                 var grpcResponse = await _grpcClient.GetUserNameGrpcAsync(grpcRequest, cancellationToken: cancellationToken);
-                artistName = grpcResponse.Username; 
+                artistName = grpcResponse.DisplayName;
             }
             catch (global::Grpc.Core.RpcException ex) when (ex.StatusCode == global::Grpc.Core.StatusCode.NotFound)
             {
                 return BadRequest(new { Error = $"Target artist with ID {ownerUserId} not found in Auth database." });
+            }
+        }
+        else
+        {
+            try
+            {
+                var grpcRequest = new UserNameGrpcRequest { UserId = ownerUserId.ToString() };
+                var grpcResponse = await _grpcClient.GetUserNameGrpcAsync(grpcRequest, cancellationToken: cancellationToken);
+                if (!string.IsNullOrWhiteSpace(grpcResponse.DisplayName))
+                    artistName = grpcResponse.DisplayName;
+            }
+            catch (global::Grpc.Core.RpcException ex)
+            {
+                _logger.LogWarning(ex, "Не вдалося отримати DisplayName для {UserId}, використовуємо ім'я з хедера.", ownerUserId);
             }
         }
 

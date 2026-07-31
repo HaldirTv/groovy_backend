@@ -8,6 +8,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 
+Groovra.Shared.DotEnvLoader.LoadFromNearestEnvFile();
+Groovra.Shared.DotEnvLoader.MapIfPresent("DB_CONNECTION_STRING", "ConnectionStrings__DefaultConnection");
+Groovra.Shared.DotEnvLoader.MapIfPresent("DB_CONNECTION_STRING", "ConnectionStrings__DefaultConnectionRemote");
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers()

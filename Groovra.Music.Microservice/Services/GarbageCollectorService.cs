@@ -16,9 +16,11 @@ public class GarbageCollectorService
     {
         _db = db;
         _logger = logger;
+        // AppContext.BaseDirectory, а не текущий каталог процесса (см. MusicService) — иначе
+        // сборщик мусора чистил бы файлы не в той папке, где они реально лежат.
         var basePathConfig = configuration["MediaStorage:BasePath"];
         _mediaStoragePath = string.IsNullOrWhiteSpace(basePathConfig)
-            ? Path.Combine(Directory.GetCurrentDirectory(), "MediaStorage")
+            ? Path.Combine(AppContext.BaseDirectory, "MediaStorage")
             : Path.GetFullPath(basePathConfig);
     }
 

@@ -31,9 +31,10 @@ public class LyricsService
         _httpClientFactory = httpClientFactory;
         _logger = logger;
 
+        // AppContext.BaseDirectory, а не текущий каталог процесса (см. MusicService).
         var basePathConfig = configuration["MediaStorage:BasePath"];
         _mediaBasePath = string.IsNullOrWhiteSpace(basePathConfig)
-            ? Path.Combine(Directory.GetCurrentDirectory(), "MediaStorage")
+            ? Path.Combine(AppContext.BaseDirectory, "MediaStorage")
             : Path.GetFullPath(basePathConfig);
 
         _modelPath = Path.Combine(_mediaBasePath, "models", "ggml-tiny.bin");

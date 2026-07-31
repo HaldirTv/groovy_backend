@@ -10,6 +10,7 @@ services:
       - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
       - Redis__ConnectionString=in-memory
       - Jwt__Key=${JWT_SECRET_KEY}
+      - Services__MusicServiceUrl=http://music-service:8080
 
   music-service:
     image: acrgroovra.azurecr.io/groovra-music:latest

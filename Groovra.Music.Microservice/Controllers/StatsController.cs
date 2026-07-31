@@ -49,4 +49,13 @@ public class StatsController : ControllerBase
 
         return Ok(result.Data);
     }
+
+    /// <summary>Лічильник ШІ-треків для адмінського дашборда. Викликається Auth-сервісом
+    /// напряму (service-to-service), тому окремої авторизації не потребує.</summary>
+    [HttpGet("ai-tracks-count")]
+    public async Task<IActionResult> GetAITracksCount(CancellationToken cancellationToken)
+    {
+        var count = await _statsService.GetAITracksCountAsync(cancellationToken);
+        return Ok(new { count });
+    }
 }

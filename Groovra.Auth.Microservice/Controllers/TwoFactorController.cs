@@ -209,6 +209,15 @@ public class TwoFactorController : ControllerBase
             return Unauthorized(new { Message = "Користувача не знайдено або 2FA вимкнено." });
         }
 
+        // Той самий бан-чек, що й у ReglogService.ValidateUserForLoginAsync. Без нього юзер,
+        // якого заблокували ПІСЛЯ пароля, але ДО завершення 2FA (тікет живе 5 хв), міг би
+        // домінтити токен - перша перевірка при паролі вже позаду й на цей крок не впливає.
+        if (user.IsSuspended)
+        {
+            await _cache.RemoveAsync(cacheKey, ctoken);
+            return Unauthorized(new { Message = "Обліковий запис заблоковано адміністратором." });
+        }
+
         bool isValidCode = _twoFactorService.VerifyTotpCode(user.TwoFactorSecret, dto.Code);
         if (!isValidCode)
         {

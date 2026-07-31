@@ -83,4 +83,13 @@ public class StatsService
 
         return ServiceResult<GlobalStatsDto>.Ok(stats);
     }
+
+    /// <summary>Кількість ШІ-згенерованих треків. Викликається Auth-сервісом (AdminService)
+    /// по HTTP для плитки на адмінському дашборді.</summary>
+    public async Task<int> GetAITracksCountAsync(CancellationToken cancellationToken = default)
+    {
+        return await _db.Tracks
+            .Where(t => !t.IsDeleted && t.IsAIGenerated)
+            .CountAsync(cancellationToken);
+    }
 }

@@ -177,9 +177,28 @@ public class ReglogService
 
         if (user == null || !BCrypt.Net.BCrypt.Verify(loginUser.Password, user.PasswordHash))
         {
+            await LogLoginAttemptAsync(
+                userId: user?.Id,
+                email: loginUser.Email,
+                success: false,
+                failureReason: user == null ? "UserNotFound" : "InvalidPassword",
+                ctoken: token);
+
             return ServiceResult<User>.Fail("Invalid email or password.");
         }
-        return ServiceResult<User>.Ok(user); 
+
+        // Заблокований адміністратором акаунт не пускаємо далі навіть з правильним паролем.
+        // Без цієї перевірки admin/users/{id}/suspend лише виставляв би прапорець у БД, ні на
+        // що не впливаючи. Пишемо в аудит окремою причиною, щоб було видно в панелі безпеки.
+        if (user.IsSuspended)
+        {
+            await LogLoginAttemptAsync(user.Id, loginUser.Email, false, "AccountSuspended", token);
+            return ServiceResult<User>.Fail("Обліковий запис заблоковано адміністратором.");
+        }
+
+        await LogLoginAttemptAsync(user.Id, loginUser.Email, true, null, token);
+
+        return ServiceResult<User>.Ok(user);
     }
     public async Task<ServiceResult<User>> LoginOrRegisterGoogleUserAsync(string email, string username, CancellationToken token = default)
     {
@@ -189,6 +208,15 @@ public class ReglogService
 
         if (user != null)
         {
+            // Та сама перевірка блокування, що й у звичайному логіні - інакше через Google
+            // можна було б обійти suspend.
+            if (user.IsSuspended)
+            {
+                await LogLoginAttemptAsync(user.Id, email, false, "AccountSuspended", token);
+                return ServiceResult<User>.Fail("Обліковий запис заблоковано адміністратором.");
+            }
+
+            await LogLoginAttemptAsync(user.Id, email, true, null, token);
             return ServiceResult<User>.Ok(user);
         }
 
@@ -411,5 +439,32 @@ public async Task<bool> VerifyResetTokenAsync(string email, string token)
         IQueryable<User> query = _context.Users;
         if (loadReference) query = query.Include(u => u.Roles);
         return await query.FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
+    }
+
+    /// <summary>Пише спробу входу в auth.LoginAudits для адмінської панелі безпеки.
+    /// Свідомо ковтає власні винятки: збій аудиту не має ламати сам логін.
+    /// IpAddress тут завжди null - сервіс не має доступу до HttpContext; IP проставляє
+    /// контролер там, де він потрібен.</summary>
+    private async Task LogLoginAttemptAsync(Guid? userId, string email, bool success,
+        string? failureReason, CancellationToken ctoken = default)
+    {
+        try
+        {
+            _context.LoginAudits.Add(new LoginAudit
+            {
+                UserId = userId,
+                Email = email,
+                Success = success,
+                IpAddress = null,
+                FailureReason = failureReason,
+                CreatedAt = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync(ctoken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARNING] Failed to log login attempt: {ex.Message}");
+        }
     }
 }

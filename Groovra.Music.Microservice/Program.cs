@@ -13,6 +13,12 @@ using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 using StackExchange.Redis;
 
+Groovra.Shared.DotEnvLoader.LoadFromNearestEnvFile();
+Groovra.Shared.DotEnvLoader.MapIfPresent("DB_CONNECTION_STRING", "ConnectionStrings__DefaultConnection");
+Groovra.Shared.DotEnvLoader.MapIfPresent("DB_CONNECTION_STRING", "ConnectionStrings__DefaultConnectionRemote");
+Groovra.Shared.DotEnvLoader.MapIfPresent("GEMINI_API_KEY", "Gemini__ApiKey");
+Groovra.Shared.DotEnvLoader.MapIfPresent("OPENMODEL_API_KEY", "OpenModel__ApiKey");
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers(options =>
@@ -235,9 +241,11 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
 }
 
+// AppContext.BaseDirectory, а не текущий каталог процесса: статика /music/files/* должна
+// раздаваться из той же папки, куда пишет UploadService, независимо от способа запуска.
 var basePathConfig = builder.Configuration["MediaStorage:BasePath"];
 string mediaPath = string.IsNullOrWhiteSpace(basePathConfig)
-    ? Path.Combine(Directory.GetCurrentDirectory(), "MediaStorage")
+    ? Path.Combine(AppContext.BaseDirectory, "MediaStorage")
     : Path.GetFullPath(basePathConfig);
 
 try
