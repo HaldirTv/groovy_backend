@@ -10,14 +10,14 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["Groovra.ChatService.Microservice/Groovra.ChatService.Microservice.csproj", "Groovra.ChatService.Microservice/"]
 COPY ["Groovra.Shared/Groovra.Shared.csproj", "Groovra.Shared/"]
-RUN --mount=type=cache,target=/root/.nuget/packages \
+RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
     dotnet restore "Groovra.ChatService.Microservice/Groovra.ChatService.Microservice.csproj" -r linux-x64
 COPY . .
 WORKDIR "/src/Groovra.ChatService.Microservice"
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN --mount=type=cache,target=/root/.nuget/packages \
+RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
     dotnet publish "./Groovra.ChatService.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/publish -r linux-x64 --self-contained false /p:UseAppHost=false /p:DebugType=none
 
 FROM base AS final

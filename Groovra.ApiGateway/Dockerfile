@@ -11,7 +11,7 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["Groovra.ApiGateway/Groovra.ApiGateway.csproj", "Groovra.ApiGateway/"]
 COPY ["Groovra.Shared/Groovra.Shared.csproj", "Groovra.Shared/"]
-RUN --mount=type=cache,target=/root/.nuget/packages \
+RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
     dotnet restore "Groovra.ApiGateway/Groovra.ApiGateway.csproj" -r linux-x64
 COPY . .
 WORKDIR "/src/Groovra.ApiGateway"
@@ -21,7 +21,7 @@ ARG BUILD_CONFIGURATION=Release
 # -r linux-x64 --self-contained false: контейнер завжди linux-x64, зайві RID не потрібні.
 # /p:DebugType=none: не генерувати .pdb у проді - менше файлів для копіювання й місця на диску.
 # Прибрано окремий "dotnet build -o /app/build" - фінальний образ бере лише /app/publish.
-RUN --mount=type=cache,target=/root/.nuget/packages \
+RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
     dotnet publish "./Groovra.ApiGateway.csproj" -c $BUILD_CONFIGURATION -o /app/publish -r linux-x64 --self-contained false /p:UseAppHost=false /p:DebugType=none
 
 FROM base AS final
