@@ -42,16 +42,17 @@ builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
     .AddTransforms(builderContext =>
     {
+        // YARP за замовчуванням підміняє заголовок Host на адресу кластера призначення
+        // (напр. "music-service:8080"). Music/Auth-контролери будують публічні URL
+        // (audioUrl, посилання на медіа) саме з Request.Host - тому без цього фронтенд
+        // отримував би внутрішню docker-адресу замість реального домену, і програвання
+        // треків просто не працювало б. AddOriginalHost - офіційний YARP-метод саме для
+        // цього (ручне встановлення ProxyRequest.Headers.Host у трансформі ненадійне,
+        // forwarder може перезаписати його пізніше в конвеєрі).
+        builderContext.AddOriginalHost(true);
+
         builderContext.AddRequestTransform(async transformContext =>
         {
-            // YARP за замовчуванням підміняє заголовок Host на адресу кластера призначення
-            // (напр. "music-service:8080"). Music/Auth-контролери будують публічні URL
-            // (audioUrl, посилання на медіа) саме з Request.Host - тому без цього фронтенд
-            // отримував би внутрішню docker-адресу замість реального домену, і програвання
-            // треків просто не працювало б. Повертаємо оригінальний Host, з яким прийшов
-            // запит (від Caddy - справжній публічний домен).
-            transformContext.ProxyRequest.Headers.Host = transformContext.HttpContext.Request.Host.Value;
-
             var user = transformContext.HttpContext.User;
 
             transformContext.ProxyRequest.Headers.Remove("X-User-Id");
