@@ -2,6 +2,11 @@
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 # curl - лише для docker-compose healthcheck (CMD curl), базовий образ його не має.
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# Та сама причина, що й у Music: groovra-auth-media-volume монтується в /app/MediaStorage,
+# і без наявної в образі теки з правильним власником Docker створить її від root — аватари
+# та банери користувачів не збережуться.
+RUN mkdir -p /app/MediaStorage \
+    && chown -R $APP_UID:$APP_UID /app/MediaStorage
 USER $APP_UID
 WORKDIR /app
 EXPOSE 8080

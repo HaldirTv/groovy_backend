@@ -64,7 +64,17 @@ public class UploadService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not create media path at {BasePath}, falling back to TempPath", basePath);
+            // КРИТИЧНО, а не Warning: читання (MusicService.GetTrackFileInfoAsync і статика
+            // /music/files/* у Program.cs) такого відкату НЕ роблять — вони завжди дивляться в
+            // MediaStorage:BasePath. Тобто після відкату файли пишуться туди, де їх ніхто не
+            // шукає: трек створюється в БД, а аудіо й обкладинка віддають 404. Найчастіша
+            // причина — named volume, змонтований у теку, якої немає в образі: Docker створює
+            // її від root, а процес працює під non-root $APP_UID.
+            _logger.LogCritical(ex,
+                "НЕ ВДАЛОСЬ ПИСАТИ В {BasePath} — використовую тимчасову теку. " +
+                "Завантажені файли НЕ будуть доступні для відтворення! " +
+                "Перевірте права на теку/volume (потрібен власник $APP_UID).", basePath);
+
             _mediaBasePath = Path.Combine(Path.GetTempPath(), "MediaStorage");
             try
             {

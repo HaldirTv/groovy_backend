@@ -2,6 +2,12 @@
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 # curl - лише для docker-compose healthcheck (CMD curl), базовий образ його не має.
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# /app/media має існувати в образі з правильним власником ДО монтування groovra-media-volume:
+# порожній named volume успадковує вміст і ПРАВА з цього шляху в образі. Без цього Docker
+# створює точку монтування від root, non-root $APP_UID не може туди писати, і UploadService
+# мовчки відкочується в /tmp — трек з'являється в БД, а аудіо та обкладинка віддають 404.
+RUN mkdir -p /app/media/audio /app/media/covers /app/media/albumcovers \
+    && chown -R $APP_UID:$APP_UID /app/media
 USER $APP_UID
 WORKDIR /app
 EXPOSE 8080
