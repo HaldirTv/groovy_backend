@@ -1,4 +1,5 @@
-﻿FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+﻿# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 USER $APP_UID
 WORKDIR /app
 EXPOSE 8080
@@ -10,7 +11,11 @@ WORKDIR /src
 COPY ["Groovra.Music.Microservice/Groovra.Music.Microservice.csproj", "Groovra.Music.Microservice/"]
 COPY ["Groovra.Shared/Groovra.Shared.csproj", "Groovra.Shared/"]
 COPY ["Groovra.Messaging/Groovra.Messaging.csproj", "Groovra.Messaging/"]
-RUN dotnet restore "Groovra.Music.Microservice/Groovra.Music.Microservice.csproj" -r linux-x64
+# Кеш NuGet-пакетів переживає між збірками РІЗНИХ сервісів (не лежить у шарах образу,
+# тому не роздуває його розмір) - спільні залежності (EF Core, Grpc.Tools і т.д.)
+# скачуються один раз, а не по колу для кожного з 6 сервісів.
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    dotnet restore "Groovra.Music.Microservice/Groovra.Music.Microservice.csproj" -r linux-x64
 COPY . .
 WORKDIR "/src/Groovra.Music.Microservice"
 
@@ -21,7 +26,8 @@ ARG BUILD_CONFIGURATION=Release
 # це саме те, що забило диск і зламало білд. Контейнер завжди linux-x64, інше не потрібне.
 # Прибрано також окремий "dotnet build -o /app/build" крок - фінальний образ бере файли
 # лише з /app/publish, тож проміжний build дублював ту саму важку копію натівів даремно.
-RUN dotnet publish "./Groovra.Music.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/publish -r linux-x64 --self-contained false /p:UseAppHost=false /p:DebugType=none
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    dotnet publish "./Groovra.Music.Microservice.csproj" -c $BUILD_CONFIGURATION -o /app/publish -r linux-x64 --self-contained false /p:UseAppHost=false /p:DebugType=none
 
 FROM base AS final
 WORKDIR /app

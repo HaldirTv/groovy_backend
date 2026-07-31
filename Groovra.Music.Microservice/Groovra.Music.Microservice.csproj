@@ -33,7 +33,9 @@
     <PackageReference Include="StackExchange.Redis" Version="3.0.11" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
     <PackageReference Include="Whisper.net" Version="1.7.2" />
-    <PackageReference Include="Whisper.net.AllRuntimes" Version="1.7.2" />
+    <!-- AllRuntimes тягне ще й CUDA-рантайми linux+windows (~1GB, GPU не потрібен на дроплеті
+         без відеокарти) плюс CoreML/OpenVINO/Vulkan. Runtime - лише звичайний CPU-білд. -->
+    <PackageReference Include="Whisper.net.Runtime" Version="1.7.2" />
   </ItemGroup>
   <ItemGroup>
     <Protobuf Include="..\Protos\username.proto" GrpcServices="Client" Link="Protos\username.proto" />
