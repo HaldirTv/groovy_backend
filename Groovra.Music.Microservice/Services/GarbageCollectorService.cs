@@ -143,7 +143,10 @@ public class GarbageCollectorService
 
         try
         {
-            var absolutePath = Path.Combine(_mediaStoragePath, relativePath.TrimStart('\\', '/'));
+            // '\'→'/' перед TrimStart: шляхи, збережені на Windows, мають вигляд "audio\x.mp3",
+            // і в Linux-контейнері такий файл не знаходився — GC мовчки лишав його на диску
+            // назавжди, хоча рядок у БД видаляв.
+            var absolutePath = Path.Combine(_mediaStoragePath, relativePath.Replace('\\', '/').TrimStart('/'));
 
             if (File.Exists(absolutePath))
             {

@@ -114,6 +114,7 @@ public class PlaylistService
                 CoverImageUrl        = p.CoverImageUrl,
                 UpdatedAt            = p.UpdatedAt,
                 CollageCovers = p.Tracks
+                    .Where(pt => !pt.Track!.IsDeleted)
                     .OrderBy(pt => pt.Position)
                     .Take(4)
                     .Select(pt => pt.Track!.IsExternal
@@ -164,6 +165,7 @@ public class PlaylistService
                 CoverImageUrl        = p.CoverImageUrl,
                 UpdatedAt            = p.UpdatedAt,
                 CollageCovers = p.Tracks
+                    .Where(pt => !pt.Track!.IsDeleted)
                     .OrderBy(pt => pt.Position)
                     .Take(4)
                     .Select(pt => pt.Track!.IsExternal
@@ -210,6 +212,7 @@ public class PlaylistService
                 CoverImageUrl        = p.CoverImageUrl,
                 UpdatedAt            = p.UpdatedAt,
                 CollageCovers = p.Tracks
+                    .Where(pt => !pt.Track!.IsDeleted)
                     .OrderBy(pt => pt.Position)
                     .Take(4)
                     .Select(pt => pt.Track!.IsExternal
@@ -274,6 +277,8 @@ public class PlaylistService
 
         if (track is null) return AddTrackResult.TrackNotFound;
 
+        // Трек тут завжди "живий" (вибірка вище під глобальним !IsDeleted), тому наявний
+        // зв'язок означає саме дубль, а не залишок від треку в кошику.
         var alreadyAdded = await _context.PlaylistTracks
             .AnyAsync(pt => pt.PlaylistId == playlistId && pt.TrackId == trackId, cancellationToken);
 
@@ -315,15 +320,18 @@ public class PlaylistService
 
         if (entry is null) return ServiceResult<bool>.Fail("Трек не знайдено у плейлисті.");
 
-        var trackDuration = await _context.Tracks
+        // Зв'язок лишається жити, поки трек у кошику, тому сюди може прийти вже soft-deleted
+        // трек. Його внесок у лічильники зняв ще DeleteTrackAsync — віднімати вдруге не можна,
+        // інакше плейлист показував би менше треків, ніж у ньому реально є.
+        var liveTrack = await _context.Tracks
             .AsNoTracking()
             .Where(t => t.Id == trackId)
-            .Select(t => t.DurationSeconds)
+            .Select(t => new { t.DurationSeconds })
             .FirstOrDefaultAsync(cancellationToken);
 
         var removedPosition = entry.Position;
         _context.PlaylistTracks.Remove(entry);
-        await _context.SaveChangesAsync(cancellationToken); 
+        await _context.SaveChangesAsync(cancellationToken);
 
         await _context.PlaylistTracks
             .Where(pt => pt.PlaylistId == playlistId && pt.Position > removedPosition)
@@ -331,8 +339,11 @@ public class PlaylistService
                 s => s.SetProperty(pt => pt.Position, pt => pt.Position - 1),
                 cancellationToken);
 
-        playlist.TrackCount = Math.Max(0, playlist.TrackCount - 1);
-        playlist.TotalDurationSeconds = Math.Max(0, playlist.TotalDurationSeconds - (int)Math.Round(trackDuration));
+        if (liveTrack is not null)
+        {
+            playlist.TrackCount = Math.Max(0, playlist.TrackCount - 1);
+            playlist.TotalDurationSeconds = Math.Max(0, playlist.TotalDurationSeconds - (int)Math.Round(liveTrack.DurationSeconds));
+        }
         playlist.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -406,6 +417,7 @@ public class PlaylistService
                 CoverImageUrl        = p.CoverImageUrl,
                 UpdatedAt            = p.UpdatedAt,
                 CollageCovers = p.Tracks
+                    .Where(pt => !pt.Track!.IsDeleted)
                     .OrderBy(pt => pt.Position)
                     .Take(4)
                     .Select(pt => pt.Track!.IsExternal ? pt.Track.ExternalCoverUrl : pt.Track.CoverImageRelativePath)
@@ -501,6 +513,7 @@ public class PlaylistService
                 CoverImageUrl        = p.CoverImageUrl,
                 UpdatedAt            = p.UpdatedAt,
                 CollageCovers = p.Tracks
+                    .Where(pt => !pt.Track!.IsDeleted)
                     .OrderBy(pt => pt.Position)
                     .Take(4)
                     .Select(pt => pt.Track!.IsExternal
@@ -531,6 +544,7 @@ public class PlaylistService
                     CoverImageUrl        = p.CoverImageUrl,
                     UpdatedAt            = p.UpdatedAt,
                     CollageCovers = p.Tracks
+                        .Where(pt => !pt.Track!.IsDeleted)
                         .OrderBy(pt => pt.Position)
                         .Take(4)
                         .Select(pt => pt.Track!.IsExternal
@@ -570,7 +584,10 @@ public class PlaylistService
             p.IsPrivate,
             isLiked,
             p.CreatedAt,
-            p.Tracks?.Select(pt => {
+            // Зв'язок PlaylistTrack переживає кошик треку (щоб restore повернув трек у плейлист),
+            // але сам трек при цьому відсікається глобальним !IsDeleted і приходить як null.
+            // Без цього фільтра такі рядки рендерились би як "Unknown — Unknown" у плейлисті.
+            p.Tracks?.Where(pt => pt.Track != null).Select(pt => {
                 var coverPath = !string.IsNullOrWhiteSpace(pt.Track?.CoverImageRelativePath)
                     ? pt.Track.CoverImageRelativePath
                     : pt.Track?.Album?.CoverImageRelativePath;

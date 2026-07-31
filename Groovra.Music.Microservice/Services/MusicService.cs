@@ -134,8 +134,28 @@ public class MusicService
         if (track is null)
             return null;
 
-        var absolutePath = Path.Combine(_mediaBasePath, track.AudioRelativePath);
+        // AudioRelativePath nullable: у зовнішніх (Jamendo) треків він порожній. Стрім
+        // відсікає їх раніше по IsExternal, але при неузгоджених даних Path.Combine(base, null)
+        // кидав ArgumentNullException і віддавав 500 замість 404.
+        if (string.IsNullOrWhiteSpace(track.AudioRelativePath))
+        {
+            _logger.LogWarning("Трек {TrackId} не має AudioRelativePath — стрім неможливий.", id);
+            return null;
+        }
+
+        var absolutePath = BuildMediaAbsolutePath(track.AudioRelativePath);
         return (absolutePath, track.ContentType);
+    }
+
+    /// <summary>Збирає абсолютний шлях до медіафайла з відносного, що лежить у БД.
+    /// TrimStart обов'язковий: Path.Combine мовчки ВІДКИДАЄ базовий шлях, якщо друга частина
+    /// починається з роздільника, і файл шукався б у корені диска. Нормалізація '\'→'/' потрібна
+    /// для рядків, створених на Windows (Path.Combine дає "audio\x.mp3"): у Linux-контейнері
+    /// зворотний слеш — звичайний символ імені, тому такий файл не знаходився взагалі.</summary>
+    private string BuildMediaAbsolutePath(string relativePath)
+    {
+        var normalized = relativePath.Replace('\\', '/').TrimStart('/');
+        return Path.Combine(_mediaBasePath, normalized);
     }
 
     public async Task<IReadOnlyList<Track>> GetDeletedTracksAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -178,8 +198,29 @@ public class MusicService
             }
         }
 
+        // Дзеркально до DeleteTrackAsync: там лічильники плейлистів зменшуються, тут мають
+        // повернутись. Без цього delete -> restore назавжди залишав TrackCount заниженим,
+        // і список у плейлисті не сходився з підписом "N треків".
+        var affectedPlaylistIds = await _db.PlaylistTracks
+            .Where(pt => pt.TrackId == trackId)
+            .Select(pt => pt.PlaylistId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        foreach (var playlistId in affectedPlaylistIds)
+        {
+            await _db.Playlists
+                .Where(p => p.Id == playlistId)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(p => p.TrackCount, p => p.TrackCount + 1)
+                          .SetProperty(p => p.TotalDurationSeconds, p => p.TotalDurationSeconds + (int)Math.Round(track.DurationSeconds))
+                          .SetProperty(p => p.UpdatedAt, p => DateTime.UtcNow),
+                    cancellationToken);
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
         await InvalidateTrackCachesAsync(trackId, cancellationToken);
+        await InvalidatePlaylistCachesAsync(cancellationToken);
         return true;
     }
 
@@ -216,16 +257,20 @@ public class MusicService
                     cancellationToken);
         }
 
-        var playlistEntries = await _db.PlaylistTracks
+        // Зв'язки з плейлистами НЕ видаляємо — рівно та сама семантика, що вже діє для
+        // альбомів: кошик зберігає склад, звільняє треки лише остаточне видалення
+        // (PermanentlyDeleteTrackAsync + 30-денний GarbageCollectorService). Раніше тут був
+        // RemoveRange, через який відновлений трек назавжди зникав зі своїх плейлистів —
+        // restore фізично не мав звідки взяти втрачені рядки. Самі рядки в читанні
+        // відфільтровуються глобальним !IsDeleted, тому "привидів" у плейлисті не буде.
+        var affectedPlaylistIds = await _db.PlaylistTracks
             .Where(pt => pt.TrackId == trackId)
+            .Select(pt => pt.PlaylistId)
+            .Distinct()
             .ToListAsync(cancellationToken);
 
-        if (playlistEntries.Any())
+        if (affectedPlaylistIds.Count > 0)
         {
-            var affectedPlaylistIds = playlistEntries.Select(pt => pt.PlaylistId).Distinct().ToList();
-
-            _db.PlaylistTracks.RemoveRange(playlistEntries);
-
             foreach (var playlistId in affectedPlaylistIds)
             {
                 await _db.Playlists
@@ -256,6 +301,7 @@ public class MusicService
 
         await transaction.CommitAsync(cancellationToken);
         await InvalidateTrackCachesAsync(trackId, cancellationToken);
+        await InvalidatePlaylistCachesAsync(cancellationToken);
 
         _logger.LogInformation("Трек успешно переведен в статус Soft-Deleted. Id={TrackId}, Title={Title}", trackId, track.Title);
         return true;
@@ -329,7 +375,7 @@ public class MusicService
         if (string.IsNullOrWhiteSpace(relativePath)) return;
         try
         {
-            var absolutePath = Path.Combine(_mediaBasePath, relativePath.TrimStart('\\', '/'));
+            var absolutePath = BuildMediaAbsolutePath(relativePath);
             if (File.Exists(absolutePath)) File.Delete(absolutePath);
         }
         catch (Exception ex)
@@ -414,6 +460,14 @@ public class MusicService
         {
             await _cache.RemoveByPatternAsync(pattern, cancellationToken);
         }
+    }
+
+    /// <summary>Списки плейлистів кешуються окремим ключем, якого немає в CacheKeys.ListPatterns,
+    /// тому після зміни складу/лічильників плейлиста їх треба скидати явно — інакше плейлист
+    /// ще до 30 хвилин показував би старий TrackCount після видалення/відновлення треку.</summary>
+    private async Task InvalidatePlaylistCachesAsync(CancellationToken cancellationToken)
+    {
+        await _cache.RemoveByPatternAsync(CacheKeys.PlaylistsSearchPatternAll, cancellationToken);
     }
 
     private void DeleteFileIfExists(string absolutePath)
